@@ -188,7 +188,8 @@ const loginStageNames = {
   upstream_connection_failed:'쌤카페 서버 연결 실패',
   upstream_responded:'쌤카페 서버가 응답함',
   upstream_response_unrecognized:'로그인 응답 구조를 인식하지 못함',
-  upstream_rejected:'쌤카페 서버가 로그인을 거부함',
+  upstream_rejected:'쌤카페 서버에서 0000이 아닌 응답 코드를 반환함',
+  success_code_missing:'응답에 rspcode 성공 코드가 없음',
   additional_auth_required:'앱 추가 인증 또는 기기 등록이 필요할 가능성',
   authenticated:'로그인 API 인증 성공'
 };
@@ -196,7 +197,13 @@ function loginTraceText(attempt){
   if(!attempt)return '이번 서버 실행 중 로그인 요청 기록이 없습니다.';
   const stage=loginStageNames[attempt.stage]||'알 수 없는 로그인 처리 단계';
   const info=[];
-  if(attempt.upstreamCode!==null)info.push('응답 코드: '+attempt.upstreamCode);
+  if(attempt.upstreamCode!==null)info.push('rspcode: '+attempt.upstreamCode);
+  else if(attempt.codeLocation==='missing')info.push('rspcode: 없음');
+  if(attempt.codeLocation)info.push('코드 위치: '+({result:'result 내부',outer:'바깥 응답',missing:'확인되지 않음'}[attempt.codeLocation]||attempt.codeLocation));
+  if(attempt.rescode)info.push('rescode: '+attempt.rescode);
+  if(attempt.resultType)info.push('result 형식: '+attempt.resultType);
+  if(attempt.resultKeys?.length)info.push('result 필드: '+attempt.resultKeys.join(', '));
+  if(attempt.outerKeys?.length)info.push('바깥 필드: '+attempt.outerKeys.join(', '));
   if(attempt.secondFactorAccepted!==null)info.push('추가 인증 조건: '+(attempt.secondFactorAccepted?'충족':'미충족'));
   if(attempt.tokenProvided!==null)info.push('인증 토큰 발급: '+(attempt.tokenProvided?'확인':'확인되지 않음'));
   return stage+(info.length?' · '+info.join(' · '):'');
