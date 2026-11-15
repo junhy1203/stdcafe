@@ -9,7 +9,7 @@
   <title>SSAMCAFE Web — 개인용 조회 클라이언트</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="style.css?v=20261116-diagnostics-v5" />
-  <script defer src="app.js?v=20261116-envelope-check-v6"></script>
+  <script defer src="app.js?v=20261116-home-api-v7"></script>
 </head>
 <body>
   <div class="shell">
@@ -35,6 +35,13 @@
             <article class="overview-card"><div class="card-top"><span>이용 가능한 좌석</span><span class="light-tag">AVAILABLE</span></div><div class="big-value" id="available-count">—</div><div class="muted" id="available-detail">좌석 정보 없음</div><div class="available-legend"><span class="dot available"></span>이용 가능 <span class="dot occupied"></span>사용 중</div></article>
           </div>
           <div class="section-grid"><section class="panel panel-map"><div class="panel-title"><div><h2>좌석 현황</h2><p id="map-summary">매장 좌석의 이용 상태를 확인하세요.</p></div><button class="text-action" data-view="seats">전체보기 <span>→</span></button></div><div id="seat-map-home" class="seat-grid" aria-label="좌석 현황"></div><div class="map-key"><span><i class="legend-square available"></i>이용 가능</span><span><i class="legend-square occupied"></i>사용 중</span><span><i class="legend-square my"></i>내 좌석</span><span><i class="legend-square disabled"></i>사용 불가</span></div></section><section class="panel panel-store"><div class="panel-title"><div><h2>이용 중인 매장</h2><p>내 매장 정보</p></div></div><div class="store-art"><div class="art-circle one"></div><div class="art-circle two"></div><span>YOUR SPACE</span></div><div class="store-name" id="store-name">매장 정보 없음</div><div class="store-address" id="store-address">연결 후 확인할 수 있습니다.</div><div class="store-divider"></div><div class="store-row"><span>데이터 갱신</span><strong id="last-update">—</strong></div><a class="official-link" href="https://m.ssamcafe.com/mobile/storeList.do" target="_blank" rel="noopener noreferrer">공식 매장 목록 열기 <span>↗</span></a></section></div>
+          <section class="panel live-panel" id="structured-home-panel" hidden>
+            <div class="panel-title"><div><h2>앱 홈에서 조회한 매장·이용권</h2><p>앱 API에서 확인된 항목만 표시하며, 최근 이용 매장을 현재 연동 매장으로 추정하지 않습니다.</p></div></div>
+            <div class="structured-columns">
+              <div><h3>현재 이용 매장 및 최근 방문 매장</h3><div id="structured-stores" class="structured-items"></div></div>
+              <div><h3>확인된 이용권</h3><div id="structured-tickets" class="structured-items"></div></div>
+            </div>
+          </section>
           <section class="panel live-panel" id="live-panel" hidden><div class="panel-title"><div><h2>서버에서 받은 실제 정보</h2><p>공식 회원 페이지의 텍스트를 읽기 전용으로 표시합니다. 일부 정보는 앱 전용 JavaScript에만 있을 수 있습니다.</p></div></div><div id="live-sources" class="source-list"></div></section>
         </section>
         
