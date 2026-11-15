@@ -83,7 +83,7 @@ function render(){
   setText('pass-title',t.name);setText('pass-left',minutesText(t.remainingMinutes));setText('pass-total',minutesText(t.totalMinutes));
   $('pass-bar').style.width=ratio+'%';setText('pass-store',d.store.name);
   setText('pass-seat',d.member.seat||'—');setText('pass-updated',state.origin==='demo'?'예시 데이터':safeDate(d.updatedAt));
-  setText('pass-source',state.origin==='demo'?'샘플':state.origin==='file'?'사용자 불러오기':state.origin==='live'?'쌤카페 서버 HTML':'사용자 API');
+  setText('pass-source',state.origin==='demo'?'샘플':state.origin==='file'?'사용자 불러오기':state.origin==='live'?'쌤카페 앱 API 및 회원 페이지':'사용자 API');
   setText('today',new Intl.DateTimeFormat('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'short'}).format(new Date()));
   const views = {
     demo:['예시 데이터', '예시 화면입니다.', '실제 매장·이용권 정보가 아닌 샘플입니다.'],
@@ -187,8 +187,13 @@ function renderStructured(live){
     structuredRow(storesEl,v.name||'매장명 없음','최근 이용 · '+(v.goodsName||'이용권명 미확인')+(v.remainingRaw?' · 잔여값 원문 '+v.remainingRaw:''));
   }
   for(const p of passes){
-    const detail=[p.shopName,p.remainingPeriod?'남은 기간(원문) '+p.remainingPeriod:'',p.seatState?'좌석 상태 '+p.seatState:''].filter(Boolean).join(' · ');
+    const detail=[p.shopName,p.remainingPeriod?'잔여기간 원문 '+p.remainingPeriod:'',p.seatState?'좌석 상태 '+p.seatState:''].filter(Boolean).join(' · ');
     structuredRow(passesEl,p.goodsName||'이용권명 미확인',detail);
+  }
+  if(!passes.length){
+    for(const r of recent.filter(v=>v.goodsName)){
+      structuredRow(passesEl,r.goodsName,'최근 이용 내역 · '+(r.name||'매장 미확인')+(r.remainingRaw?' · 잔여값 원문 '+r.remainingRaw:''));
+    }
   }
   if(!storesEl.children.length)structuredRow(storesEl,'매장 정보 없음','앱 홈 API에서 매장명이나 최근 이용 매장이 확인되지 않았습니다.');
   if(!passesEl.children.length)structuredRow(passesEl,'이용권 정보 없음','앱 이용권 API에서 항목이 확인되지 않았습니다.');
