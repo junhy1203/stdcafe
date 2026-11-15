@@ -102,9 +102,9 @@ function render(){
   buildSeats('seat-map-home');buildSeats('seat-map-full');
 }
 function navigate(target){
-  if(!['home','seats','tickets'].includes(target))return;
+  if(!['home','seats','tickets','diagnostics'].includes(target))return;
   state.currentView=target;
-  const names={home:'대시보드',seats:'좌석 현황',tickets:'이용권 정보'};
+  const names={home:'대시보드',seats:'좌석 현황',tickets:'이용권 정보',diagnostics:'진단 모드'};
   for(const item of document.querySelectorAll('[data-view]')){if(item.classList.contains('nav-item'))item.classList.toggle('active',item.dataset.view===target);}
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===`view-${target}`));
   setText('breadcrumb',names[target]);window.scrollTo(0,0);
@@ -180,6 +180,76 @@ async function requestJson(url,options={}){
   if(!obj)throw Error('JSON 응답이 아닙니다. 서버가 실행 중인지 확인해 주세요.');
   return obj;
 }
+
+const diagNames = {profile:'내 정보',seats:'좌석 현황',tickets:'이용권',history:'이용 내역'};
+function setDiagFeedback(message){setText('diagnostics-feedback',message);}
+function showDiagnosticResult(data){
+  setText('diagnostics-version',data.version||'확인 불가');
+  setText('diagnostics-auth',data.authenticated?'로그인됨':'로그인 안 됨');
+  const last=data.lastCheck;
+  setText('diagnostics-loaded',last?.summary ? String(last.summary.pagesLoaded)+'/4개' : '조회 기록 없음');
+  setText('diagnostics-time',last?.checkedAt?safeDate(last.checkedAt):'—');
+  const parent=$('diagnostics-pages');parent.replaceChildren();
+  if(!data.authenticated){
+    setDiagFeedback('현재 페이지에 로그인 세션이 없습니다. 설정에서 로그인한 뒤 다시 진단해 주세요.');
+  }else if(!last){
+    setDiagFeedback('로그인 상태는 확인됐지만 회원정보 조회 기록이 없습니다. 회원 데이터 다시 조회를 눌러 보세요.');
+  }else{
+    setDiagFeedback('로그인 확인 · 회원 페이지 '+(last.summary?.pagesLoaded??0)+'/4개 수신');
+  }
+  if(!last){
+    setText('diagnostics-extraction','좌석·잔여시간 조회 기록 없음');
+    return;
+  }
+  setText('diagnostics-extraction','좌석 번호: '+(last.summary?.seatFound?'확인':'미확인')+' · 잔여시간: '+(last.summary?.remainingTimeFound?'확인':'미확인')+' · 좌석 배치: '+(last.summary?.seatLayoutFound?'확인':'미확인'));
+  for(const kind of ['profile','seats','tickets','history']){
+    const page=last.pages?.[kind];
+    const item=document.createElement('div');item.className='diagnostics-page-item';
+    const heading=document.createElement('strong');heading.textContent=diagNames[kind]||kind;
+    const info=document.createElement('span');
+    info.textContent=!page?'조회 기록 없음':page.ok?'응답 있음 · 표시 텍스트 '+(page.characters||0)+'자':'조회 실패 · '+(page.reason||'원인 미확인');
+    item.append(heading,info);parent.appendChild(item);
+  }
+}
+async function refreshDiagnostics(){
+  const btn=$('diagnostics-refresh');btn.disabled=true;
+  setDiagFeedback('현재 사이트의 인증 세션을 확인하고 있습니다…');
+  try{
+    const session=await requestJson('/api/session');
+    csrfToken=session.csrf;
+    liveAuthenticated=!!session.authenticated;
+    const diagnostic=await requestJson('/api/diagnostics');
+    showDiagnosticResult(diagnostic);
+  }catch(err){
+    setDiagFeedback('진단 요청 실패: '+err.message);
+    setText('diagnostics-auth','확인 실패');
+    setText('diagnostics-loaded','—');
+    setText('diagnostics-time','—');
+    setText('diagnostics-extraction','서버 접근 또는 네트워크 상태를 확인하세요.');
+    $('diagnostics-pages').replaceChildren();
+  }finally{btn.disabled=false;}
+}
+function enterDiagnostics(){
+  navigate('diagnostics');
+  refreshDiagnostics();
+}
+for(const id of ['diagnostics-from-home','diagnostics-from-sidebar']) $(id).addEventListener('click',enterDiagnostics);
+$('diagnostics-back').addEventListener('click',()=>navigate('home'));
+$('diagnostics-refresh').addEventListener('click',refreshDiagnostics);
+$('diagnostics-retry').addEventListener('click',async()=>{
+  const button=$('diagnostics-retry');button.disabled=true;
+  try{
+    const session=await requestJson('/api/session');
+    liveAuthenticated=!!session.authenticated;
+    csrfToken=session.csrf;
+    if(!liveAuthenticated){setDiagFeedback('로그인되지 않았습니다. 설정에서 로그인한 다음 다시 시도하세요.');return;}
+    setDiagFeedback('회원 페이지 4개의 데이터 조회를 요청하고 있습니다…');
+    await fetchLive();
+    await refreshDiagnostics();
+  }catch(err){setDiagFeedback('조회 요청 실패: '+err.message);}
+  finally{button.disabled=false;}
+});
+
 async function syncBridge(){
   try{
     const status=await requestJson('/api/session');
