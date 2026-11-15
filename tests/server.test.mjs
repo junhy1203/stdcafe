@@ -90,3 +90,27 @@ test('sha256 login payload produces expected fields', () => {
   assert.equal(p.password.length, 64);
   assert.equal(p.password.toUpperCase(), p.password);
 });
+
+
+test('login rate limit allows 20 requests in 5 minutes and blocks the 21st', async () => {
+  let sent = 0;
+  const server = createApp({ now: () => 1_000, fetchImpl: async () => {
+    sent += 1;
+    return mkResponse(JSON.stringify({ result: { rspcode: '1001', rspmsg: '잘못된 로그인' } }), 'application/json');
+  } });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const response = await fetch(base + '/api/session');
+    const csrf = (await response.json()).csrf;
+    const cookie = response.headers.get('set-cookie').split(';')[0];
+    const opts = { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ username: 'test', password: 'wrong' }) };
+    for (let i = 0; i < 20; i++) assert.equal((await fetch(base + '/api/login', opts)).status, 401);
+    const limited = await fetch(base + '/api/login', opts);
+    assert.equal(limited.status, 429);
+    assert.match((await limited.text()), /5분에 20회/);
+    assert.equal(sent, 20);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
