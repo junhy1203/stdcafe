@@ -12,7 +12,7 @@ import path from 'node:path';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-home-api-v7';
+const APP_VERSION = '2026-11-16-ui-fix-v8';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -422,7 +422,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
         const asset = ASSETS[pathname];
         if (!asset) throw createError(404, '파일을 찾을 수 없습니다.');
         const data = await readFile(path.join(PUBLIC, asset[0]));
-        res.writeHead(200, { 'Content-Type': asset[1], 'Cache-Control': 'no-cache' });
+        res.writeHead(200, { 'Content-Type': asset[1], 'Cache-Control': 'no-store, max-age=0, must-revalidate' });
         return res.end(req.method === 'HEAD' ? undefined : data);
       }
       throw createError(405, '지원되지 않는 요청입니다.');
