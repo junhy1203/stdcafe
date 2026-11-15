@@ -12,6 +12,7 @@ import path from 'node:path';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
+const APP_VERSION = '2026-11-16-diagnostics-v3';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -171,7 +172,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
     for (const [id, sess] of sessions) if (t - sess.last >= TTL_MS) sessions.delete(id);
     if (sessions.size >= 100) throw createError(503, '동시 사용자가 너무 많습니다.');
     const key = rand();
-    s = { csrf: rand(24), device: randomBytes(8).toString('hex'), last: t, token: '', name: '', jar: new Map() };
+    s = { csrf: rand(24), device: randomBytes(8).toString('hex'), last: t, token: '', name: '', jar: new Map(), lastDiagnostic: null };
     sessions.set(key, s);
     const secure = req.socket.encrypted ? '; Secure' : '';
     res.setHeader('Set-Cookie', `${COOKIE}=${key}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${TTL_MS/1000}${secure}`);
@@ -196,10 +197,11 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
     const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
     try {
-      if (pathname === '/api/health' && req.method === 'GET') return response(res, 200, { ok: true, name: 'ssamcafe-private-bridge' });
+      if (pathname === '/api/health' && req.method === 'GET') return response(res, 200, { ok: true, name: 'ssamcafe-private-bridge', version: APP_VERSION });
       if (pathname.startsWith('/api/')) {
         const s = getSession(req, res);
-        if (pathname === '/api/session' && req.method === 'GET') return response(res, 200, { authenticated: !!s.token, name: s.token ? s.name : '', csrf: s.csrf, mode: 'WireGuard private, read-only', upstreamVerified: false });
+        if (pathname === '/api/session' && req.method === 'GET') return response(res, 200, { authenticated: !!s.token, name: s.token ? s.name : '', csrf: s.csrf, mode: 'WireGuard private, read-only', upstreamVerified: false, version: APP_VERSION });
+        if (pathname === '/api/diagnostics' && req.method === 'GET') return response(res, 200, { version: APP_VERSION, authenticated: !!s.token, lastCheck: s.lastDiagnostic });
         if (pathname === '/api/login' && req.method === 'POST') {
           checkMutation(req, s);
           const key = req.socket.remoteAddress || 'unknown';
@@ -208,7 +210,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           recent.push(now()); attempts.set(key, recent);
           const v = await bodyJson(req);
           if (typeof v.username !== 'string' || !v.username.trim() || v.username.length > 120 || typeof v.password !== 'string' || !v.password || v.password.length > 250 || (v.deviceId !== undefined && (typeof v.deviceId !== 'string' || v.deviceId.length < 8 || v.deviceId.length > 128))) throw createError(400, '로그인 입력값을 확인하세요.');
-          s.token = ''; s.name = ''; s.jar.clear();
+          s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null;
           if (v.deviceId) s.device = v.deviceId;
           const payload = loginPayload(v.username.trim(), v.password, s.device);
           const { text } = await upstream(`${UPSTREAM}/api/app.do`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) }, s.jar);
@@ -221,7 +223,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           return response(res, 200, { authenticated: true, name: s.name });
         }
         if (pathname === '/api/logout' && req.method === 'POST') {
-          checkMutation(req, s); s.token = ''; s.name = ''; s.jar.clear();
+          checkMutation(req, s); s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null;
           return response(res, 200, { ok: true });
         }
         if (pathname === '/api/status' && req.method === 'GET') {
@@ -234,11 +236,28 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               const { resp, text } = await upstream(url, { method: 'GET', headers: { Accept: 'text/html,application/xhtml+xml' } }, s.jar);
               if (!resp.headers.get('content-type')?.toLowerCase().includes('html')) return [kind, { ok: false, error: 'HTML 형식의 응답이 아닙니다.' }];
               const parsed = pageText(text);
+              if (/^(?:성공|success|ok|true)$/i.test(parsed.trim())) return [kind, { ok: false, error: '서버가 성공 문구만 반환했으며 실제 회원 데이터는 없습니다.' }];
               if (!parsed || (/로그인/.test(parsed.slice(0, 100)) && /아이디/.test(parsed.slice(0, 250)) && /비밀번호/.test(parsed.slice(0, 250)))) return [kind, { ok: false, error: '로그인 페이지 또는 빈 화면이 반환됐습니다.' }];
               return [kind, { ok: true, text: parsed }];
             } catch (e) { return [kind, { ok: false, error: e.message.startsWith('쌤카페 서버') ? e.message : '페이지 조회 실패' }]; }
           }));
-          return response(res, 200, asStatus(Object.fromEntries(entries), s.name));
+          const result = asStatus(Object.fromEntries(entries), s.name);
+          const pages = Object.fromEntries(entries.map(([kind, info]) => [kind, {
+            ok: info.ok,
+            characters: info.ok ? info.text.length : 0,
+            reason: info.ok ? '' : info.error,
+          }]));
+          s.lastDiagnostic = {
+            checkedAt: new Date(now()).toISOString(),
+            pages,
+            summary: {
+              pagesLoaded: Object.values(pages).filter(p => p.ok).length,
+              seatFound: !!result.member.seat,
+              remainingTimeFound: Number.isFinite(result.member.ticket.remainingMinutes),
+              seatLayoutFound: result.seats.length > 0,
+            },
+          };
+          return response(res, 200, result);
         }
         throw createError(404, '지원되지 않는 API입니다.');
       }
