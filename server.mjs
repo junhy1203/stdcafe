@@ -12,7 +12,7 @@ import path from 'node:path';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-diagnostics-v3';
+const APP_VERSION = '2026-11-16-session-check-v4';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -163,6 +163,7 @@ function checkMutation(req, s) {
 export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
   const sessions = new Map();
   const attempts = new Map();
+  const startedAt = new Date(now()).toISOString();
   function getSession(req, res) {
     const cookieVal = parseCookie(req.headers.cookie)[COOKIE] ?? '';
     let s = cookieVal && sessions.get(cookieVal);
@@ -172,10 +173,10 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
     for (const [id, sess] of sessions) if (t - sess.last >= TTL_MS) sessions.delete(id);
     if (sessions.size >= 100) throw createError(503, '동시 사용자가 너무 많습니다.');
     const key = rand();
-    s = { csrf: rand(24), device: randomBytes(8).toString('hex'), last: t, token: '', name: '', jar: new Map(), lastDiagnostic: null };
+    s = { sid: key, csrf: rand(24), device: randomBytes(8).toString('hex'), last: t, token: '', name: '', jar: new Map(), lastDiagnostic: null };
     sessions.set(key, s);
     const secure = req.socket.encrypted ? '; Secure' : '';
-    res.setHeader('Set-Cookie', `${COOKIE}=${key}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${TTL_MS/1000}${secure}`);
+    res.setHeader('Set-Cookie', `${COOKIE}=${key}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TTL_MS/1000}${secure}`);
     return s;
   }
   async function upstream(url, options = {}, jar = new Map()) {
@@ -199,9 +200,12 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
     try {
       if (pathname === '/api/health' && req.method === 'GET') return response(res, 200, { ok: true, name: 'ssamcafe-private-bridge', version: APP_VERSION });
       if (pathname.startsWith('/api/')) {
+        const presentedCookie = parseCookie(req.headers.cookie)[COOKIE] || '';
         const s = getSession(req, res);
-        if (pathname === '/api/session' && req.method === 'GET') return response(res, 200, { authenticated: !!s.token, name: s.token ? s.name : '', csrf: s.csrf, mode: 'WireGuard private, read-only', upstreamVerified: false, version: APP_VERSION });
-        if (pathname === '/api/diagnostics' && req.method === 'GET') return response(res, 200, { version: APP_VERSION, authenticated: !!s.token, lastCheck: s.lastDiagnostic });
+        const cookieRecognized = Boolean(presentedCookie && presentedCookie === s.sid);
+        const sessionInfo = { cookieSent: Boolean(presentedCookie), cookieRecognized, serverStartedAt: startedAt };
+        if (pathname === '/api/session' && req.method === 'GET') return response(res, 200, { authenticated: !!s.token, name: s.token ? s.name : '', csrf: s.csrf, mode: 'WireGuard private, read-only', upstreamVerified: false, version: APP_VERSION, session: sessionInfo });
+        if (pathname === '/api/diagnostics' && req.method === 'GET') return response(res, 200, { version: APP_VERSION, authenticated: !!s.token, lastCheck: s.lastDiagnostic, session: sessionInfo });
         if (pathname === '/api/login' && req.method === 'POST') {
           checkMutation(req, s);
           const key = req.socket.remoteAddress || 'unknown';
