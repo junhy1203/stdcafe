@@ -170,6 +170,7 @@ function showLiveSources(sources){
   $('live-ticket-source').appendChild(sourceBlock('tickets',sources?.tickets));
 }
 function bridgeStatus(msg){setText('bridge-status',msg);}
+function lookupSummary(msg){const el=$('lookup-summary');if(el)el.textContent=msg;}
 function bridgeError(msg){$('bridge-error').textContent=msg;$('bridge-error').hidden=false;}
 function clearBridgeError(){$('bridge-error').hidden=true;}
 async function requestJson(url,options={}){
@@ -188,16 +189,18 @@ async function syncBridge(){
     $('bridge-logout').hidden=!status.authenticated;
     if(status.authenticated){
       state.data=normalize(liveBlank());state.origin='live';render();
+      lookupSummary('로그인 상태 확인됨 · 실제 좌석·잔여시간 조회 중');
       await fetchLive();
-    }
+    } else lookupSummary('로그인하지 않았습니다. 실제 값은 아직 없습니다.');
   }catch{
     bridgeStatus('개인용 서버 브리지 없음 — 이 사이트의 Node.js 서버가 실행 중인지 확인하세요.');
     $('bridge-login').disabled=true;
+    lookupSummary('개인용 웹서버 연결에 실패했습니다.');
   }
 }
 async function fetchLive(){
   if(!liveAuthenticated){bridgeError('먼저 로그인해 주세요.');return false;}
-  const btn=$('refresh');btn.disabled=true;bridgeStatus('쌤카페 서버의 4개 회원 페이지 조회 중…');clearBridgeError();
+  const btn=$('refresh');btn.disabled=true;bridgeStatus('쌤카페 서버의 4개 회원 페이지 조회 중…');lookupSummary('로그인 성공 · 실제 회원 페이지 4개를 조회하고 있습니다…');clearBridgeError();
   // Clear stale/demo values before the request, including after a page reload.
   state.data=normalize(liveBlank());state.origin='live';state.endpoint=null;state.selectedSeat=null;render();
   try{
@@ -210,6 +213,8 @@ async function fetchLive(){
     if(count===0){
       state.origin='error';render();
       bridgeStatus('로그인 성공 · 실제 회원 페이지 조회 0/4개');
+      const reasons=Object.entries(sources).filter(([,v])=>!v.ok).slice(0,2).map(([k,v])=>`${sourceNames[k]||k}: ${v.error||'응답 없음'}`).join(' / ');
+      lookupSummary(`로그인 성공 · 회원정보 조회 0/4개 실패. ${reasons} 자세한 원인은 좌측 '서버 조회 진단'에서 확인하세요.`);
       bridgeError('로그인은 성공했지만 4개 회원 페이지를 읽지 못했습니다. 아래 서버 조회 결과에 오류 사유가 표시됩니다.');
       toast('로그인은 성공했지만 데이터 조회 실패');
       return false;
@@ -217,18 +222,21 @@ async function fetchLive(){
     if(!hasValue){
       state.origin='error';render();
       bridgeStatus(`로그인 성공 · 페이지 ${count}/4개 수신 · 좌석·잔여시간 인식 실패`);
+      lookupSummary(`로그인 성공 · 회원 페이지 ${count}/4개 응답 · 좌석·잔여시간 추출 실패. 서버 조회 진단을 확인하세요.`);
       bridgeError('서버 페이지 응답은 받았지만 좌석 번호·남은 시간을 찾지 못했습니다. 페이지 데이터가 앱 내 JavaScript에서 추가로 생성될 수 있습니다.');
       toast('서버 데이터는 왔지만 표시할 값을 추출하지 못함');
       return false;
     }
     state.origin='live';render();
     bridgeStatus(`로그인됨 · 실제 웹페이지 ${count}/4개 수신 · 확인된 값만 반영`);
+    lookupSummary(`회원 페이지 ${count}/4개 확인 · 좌석: ${received.member?.seat ? '확인' : '미확인'} · 잔여시간: ${Number.isFinite(received.member?.ticket?.remainingMinutes) ? '확인' : '미확인'} · 좌석 배치: ${received.seats?.length ? '확인' : '미확인'}`);
     toast(`서버 페이지 ${count}/4개 조회 · 확인된 값 반영`);
     return true;
   }catch(err){
     state.data=normalize(liveBlank());state.origin='error';render();
     bridgeError(`실시간 조회 실패: ${err.message}`);
     bridgeStatus('로그인 성공 · 서버 조회 오류');
+    lookupSummary(`로그인은 성공했지만 데이터 조회 중 오류: ${err.message}`);
     toast('로그인 성공, 데이터 조회 실패');
     return false;
   }finally{btn.disabled=false;}
@@ -244,6 +252,7 @@ $('bridge-login-form').addEventListener('submit',async(e)=>{
   try{
     await requestJson('/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({username,password:pw,...(device?{deviceId:device}:{})})});
     liveAuthenticated=true;
+    lookupSummary('로그인 성공 · 쌤카페 회원 페이지 연결을 확인하는 중…');
     $('bridge-logout').hidden=false;
     state.data=normalize(liveBlank());state.origin='live';render();
     const loaded=await fetchLive();
@@ -255,7 +264,7 @@ $('bridge-login-form').addEventListener('submit',async(e)=>{
 $('bridge-logout').addEventListener('click',async()=>{
   try{await requestJson('/api/logout',{method:'POST',headers:{'X-CSRF-Token':csrfToken}});
     liveAuthenticated=false;$('bridge-logout').hidden=true;bridgeStatus('로그아웃 완료');
-    state.data=normalize(liveBlank());state.origin='unlinked';render();clearLiveSources();toast('로그아웃했습니다.');
+    state.data=normalize(liveBlank());state.origin='unlinked';render();clearLiveSources();lookupSummary('로그아웃됨 · 회원 데이터 없음');toast('로그아웃했습니다.');
   }catch(err){bridgeError(err.message);}
 });
 render();
