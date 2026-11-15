@@ -149,6 +149,9 @@ $('refresh').addEventListener('click',()=>{if(state.origin==='live' && liveAuthe
 const sourceNames = {profile:'내 정보',seats:'좌석 현황',tickets:'이용권 정보',history:'이용 내역'};
 const liveBlank = () => ({store:{name:'매장 정보 미확인',address:'서버 데이터에서 매장명을 확인하지 못했습니다.'},member:{seat:null,seatDetail:'',ticket:{name:'이용권 정보',remainingMinutes:null,totalMinutes:null}},seats:[],updatedAt:null});
 function clearLiveSources(){
+  $('structured-home-panel').hidden=true;
+  $('structured-stores').replaceChildren();
+  $('structured-tickets').replaceChildren();
   for(const id of ['live-panel','live-seat-panel','live-ticket-panel'])$(id).hidden=true;
   for(const id of ['live-sources','live-seat-source','live-ticket-source'])$(id).replaceChildren();
 }
@@ -159,6 +162,39 @@ function sourceBlock(kind,source){
   const pre=document.createElement('pre');pre.textContent=source.text||'(서버에서 확인 가능한 표시 텍스트가 없습니다.)';wrap.appendChild(pre);
   return wrap;
 }
+
+function structuredRow(parent,title,detail){
+  const item=document.createElement('article');item.className='structured-item';
+  const strong=document.createElement('strong');strong.textContent=title||'이름 미확인';
+  const info=document.createElement('p');info.textContent=detail||'추가 정보 없음';
+  item.append(strong,info);parent.appendChild(item);
+}
+function renderStructured(live){
+  const current=live?.currentShop||{};
+  const recent=Array.isArray(live?.recentShops)?live.recentShops:[];
+  const passes=Array.isArray(live?.ticketItems)?live.ticketItems:[];
+  const storesEl=$('structured-stores'), passesEl=$('structured-tickets');
+  storesEl.replaceChildren();passesEl.replaceChildren();
+  const seen=new Set();
+  if(current.name){
+    structuredRow(storesEl,current.name,'앱 홈에서 확인된 현재 매장');
+    seen.add(current.shopNo||current.name);
+  }
+  for(const v of recent){
+    const key=v.shopNo||v.name;
+    if(key&&seen.has(key))continue;
+    if(key)seen.add(key);
+    structuredRow(storesEl,v.name||'매장명 없음','최근 이용 · '+(v.goodsName||'이용권명 미확인')+(v.remainingRaw?' · 잔여값 원문 '+v.remainingRaw:''));
+  }
+  for(const p of passes){
+    const detail=[p.shopName,p.remainingPeriod?'남은 기간(원문) '+p.remainingPeriod:'',p.seatState?'좌석 상태 '+p.seatState:''].filter(Boolean).join(' · ');
+    structuredRow(passesEl,p.goodsName||'이용권명 미확인',detail);
+  }
+  if(!storesEl.children.length)structuredRow(storesEl,'매장 정보 없음','앱 홈 API에서 매장명이나 최근 이용 매장이 확인되지 않았습니다.');
+  if(!passesEl.children.length)structuredRow(passesEl,'이용권 정보 없음','앱 이용권 API에서 항목이 확인되지 않았습니다.');
+  $('structured-home-panel').hidden=false;
+}
+
 function showLiveSources(sources){
   clearLiveSources();
   $('live-panel').hidden=false;
@@ -244,7 +280,14 @@ function showDiagnosticResult(data, sessionResponse){
     setText('diagnostics-extraction','좌석·잔여시간 조회 기록 없음');
     return;
   }
-  setText('diagnostics-extraction','좌석 번호: '+(last.summary?.seatFound?'확인':'미확인')+' · 잔여시간: '+(last.summary?.remainingTimeFound?'확인':'미확인')+' · 좌석 배치: '+(last.summary?.seatLayoutFound?'확인':'미확인'));
+  setText('diagnostics-extraction','현재 매장: '+(last.summary?.shopFound?'확인':'미확인')+' · 이용권: '+(last.summary?.ticketFound?'확인':'미확인')+' · 좌석 번호: '+(last.summary?.seatFound?'확인':'미확인')+' · 잔여시간: '+(last.summary?.remainingTimeFound?'확인':'미확인')+' · 좌석 배치: '+(last.summary?.seatLayoutFound?'확인':'미확인'));
+  for(const [key,label] of [['home','홈/매장 API 1100'],['goods','이용권 API 1101']]){
+    const item=document.createElement('div');item.className='diagnostics-page-item';
+    const h=document.createElement('strong');h.textContent=label;
+    const info=document.createElement('span');const api=last.apis?.[key];
+    info.textContent=!api?'조회 기록 없음':api.ok?'앱 API 응답 성공':'앱 API 실패: '+(api.reason||'원인 미확인');
+    item.append(h,info);parent.appendChild(item);
+  }
   for(const kind of ['profile','seats','tickets','history']){
     const page=last.pages?.[kind];
     const item=document.createElement('div');item.className='diagnostics-page-item';
@@ -329,32 +372,39 @@ async function fetchLive(){
     state.data=normalize(received);
     const sources=received.live?.sources||{};
     showLiveSources(sources);
+    renderStructured(received.live);
     const count=Object.values(sources).filter(s=>s.ok).length;
-    const hasValue=Boolean(received.member?.seat) || Number.isFinite(received.member?.ticket?.remainingMinutes);
-    if(count===0){
+    const apis=received.live?.apis||{};
+    const apiCount=Object.values(apis).filter(v=>v.ok).length;
+    const hasValue=Boolean(received.member?.seat)
+      || Number.isFinite(received.member?.ticket?.remainingMinutes)
+      || (received.store?.name && received.store.name!=='매장 정보 미확인')
+      || Boolean(received.live?.ticketItems?.length)
+      || Boolean(received.live?.recentShops?.length);
+    if(count===0 && apiCount===0){
       state.origin='error';render();
-      bridgeStatus('로그인 성공 · 실제 회원 페이지 조회 0/4개');
+      bridgeStatus('로그인 성공 · 웹페이지 및 앱 API 조회 실패');
       const reasons=Object.entries(sources).filter(([,v])=>!v.ok).slice(0,2).map(([k,v])=>`${sourceNames[k]||k}: ${v.error||'응답 없음'}`).join(' / ');
       lookupSummary(`로그인 성공 · 회원정보 조회 0/4개 실패. ${reasons} 자세한 원인은 좌측 '서버 조회 진단'에서 확인하세요.`);
-      bridgeError('로그인은 성공했지만 4개 회원 페이지를 읽지 못했습니다. 아래 서버 조회 결과에 오류 사유가 표시됩니다.');
+      bridgeError('인증은 성공했지만 웹페이지와 앱 API 모두에서 유효한 데이터를 조회하지 못했습니다.');
       toast('로그인은 성공했지만 데이터 조회 실패');
       return false;
     }
     if(!hasValue){
       state.origin='error';render();
       bridgeStatus(`로그인 성공 · 페이지 ${count}/4개 수신 · 좌석·잔여시간 인식 실패`);
-      lookupSummary(`로그인 성공 · 회원 페이지 ${count}/4개 응답 · 좌석·잔여시간 추출 실패. 서버 조회 진단을 확인하세요.`);
-      bridgeError('서버 페이지 응답은 받았지만 좌석 번호·남은 시간을 찾지 못했습니다. 페이지 데이터가 앱 내 JavaScript에서 추가로 생성될 수 있습니다.');
+      lookupSummary('로그인 성공 · 회원 페이지 '+count+'/4개, 앱 API '+apiCount+'/2개 응답 · 실사용자 데이터를 찾지 못했습니다. 진단 모드를 확인하세요.');
+      bridgeError('서버 응답은 받았지만 매장명·이용권·좌석·잔여시간 값을 아직 찾지 못했습니다.');
       toast('서버 데이터는 왔지만 표시할 값을 추출하지 못함');
       return false;
     }
     state.origin='live';render();
-    bridgeStatus(`로그인됨 · 실제 웹페이지 ${count}/4개 수신 · 확인된 값만 반영`);
-    lookupSummary(`회원 페이지 ${count}/4개 확인 · 좌석: ${received.member?.seat ? '확인' : '미확인'} · 잔여시간: ${Number.isFinite(received.member?.ticket?.remainingMinutes) ? '확인' : '미확인'} · 좌석 배치: ${received.seats?.length ? '확인' : '미확인'}`);
-    toast(`서버 페이지 ${count}/4개 조회 · 확인된 값 반영`);
+    bridgeStatus('로그인됨 · 앱 API '+apiCount+'/2개 · 웹페이지 '+count+'/4개 · 확인된 값 반영');
+    lookupSummary('현재 매장: '+(received.store?.name&&received.store.name!=='매장 정보 미확인'?'확인':'미확인')+' · 이용권: '+(received.live?.ticketItems?.length?'확인':'미확인')+' · 좌석: '+(received.member?.seat?'확인':'미확인')+' · 잔여시간: '+(Number.isFinite(received.member?.ticket?.remainingMinutes)?'확인':'미확인'));
+    toast('실제 앱 데이터 '+apiCount+'/2개 API 조회 · 확인된 항목만 반영');
     return true;
   }catch(err){
-    state.data=normalize(liveBlank());state.origin='error';render();
+    state.data=normalize(liveBlank());state.origin='error';render();clearLiveSources();
     bridgeError(`실시간 조회 실패: ${err.message}`);
     bridgeStatus('로그인 성공 · 서버 조회 오류');
     lookupSummary(`로그인은 성공했지만 데이터 조회 중 오류: ${err.message}`);
