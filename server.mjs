@@ -204,7 +204,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           checkMutation(req, s);
           const key = req.socket.remoteAddress || 'unknown';
           const recent = (attempts.get(key) || []).filter(t => now() - t < 300_000);
-          if (recent.length >= 5) throw createError(429, '로그인 요청 제한(5분에 5회)입니다.');
+          if (recent.length >= 20) throw createError(429, '로그인 요청 제한(5분에 20회)입니다.');
           recent.push(now()); attempts.set(key, recent);
           const v = await bodyJson(req);
           if (typeof v.username !== 'string' || !v.username.trim() || v.username.length > 120 || typeof v.password !== 'string' || !v.password || v.password.length > 250 || (v.deviceId !== undefined && (typeof v.deviceId !== 'string' || v.deviceId.length < 8 || v.deviceId.length > 128))) throw createError(400, '로그인 입력값을 확인하세요.');
