@@ -239,7 +239,7 @@ test('login envelope code locations and missing codes', async () => {
       assert.equal(diag.authenticated,scenario.expected===200,scenario.name);
       assert.equal(diag.lastLogin.stage,scenario.stage,scenario.name);
       assert.equal(diag.lastLogin.codeLocation,scenario.location,scenario.name);
-      assert.equal(diag.lastLogin.tokenProvided,scenario.stage!=='upstream_response_unrecognized',scenario.name);
+      assert.equal(diag.lastLogin.tokenProvided,scenario.stage==='upstream_response_unrecognized'?null:true,scenario.name);
       assert.equal(text.includes('TOKEN_'),false,'diagnostics leaked token');
       assert.equal(text.includes('fake-password'),false,'diagnostics leaked password');
       if(scenario.name==='missing rspcode despite token')assert.equal(diag.lastLogin.rescode,'0000');
