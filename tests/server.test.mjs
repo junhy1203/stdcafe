@@ -180,3 +180,37 @@ test('Safari session cookie continuity and stale sessions after restart', async 
     assert.ok(fresh.headers.get('set-cookie'));
   } finally {await new Promise(resolve=>restarted.close(resolve));}
 });
+
+test('login trace distinguishes upstream rejection, additional auth, malformed response and success', async () => {
+  const secret = 'NEVER_SHOW_SECRET_AUTH_TOKEN';
+  const cases = [
+    { status: 401, stage: 'upstream_rejected', code: '1001', upstream: { result: { rspcode: '1001', s_value: 'N', rspmsg: '비밀번호 오류' } } },
+    { status: 409, stage: 'additional_auth_required', code: '0000', upstream: { result: { rspcode: '0000', s_value: 'N' } } },
+    { status: 502, stage: 'upstream_response_unrecognized', code: null, upstream: { result: '{not json' } },
+    { status: 200, stage: 'authenticated', code: '0000', upstream: { result: { rspcode: '0000', s_value: 'Y', a_value: secret, name: '회원' } } },
+  ];
+  for (const scenario of cases) {
+    const srv=createApp({ fetchImpl: async () => mkResponse(JSON.stringify(scenario.upstream), 'application/json') });
+    await new Promise(resolve => srv.listen(0, '127.0.0.1', resolve));
+    const base='http://127.0.0.1:'+srv.address().port;
+    try {
+      const start=await fetch(base+'/api/session');
+      const csrf=(await start.json()).csrf;
+      const cookie=start.headers.get('set-cookie').split(';')[0];
+      const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'user1',password:'secret-password'})});
+      assert.equal(login.status,scenario.status);
+      const diagResp=await fetch(base+'/api/diagnostics',{headers:{Cookie:cookie}});
+      assert.equal(diagResp.status,200);
+      const raw=await diagResp.text();
+      const diag=JSON.parse(raw);
+      assert.equal(diag.lastLogin.stage,scenario.stage);
+      assert.equal(diag.lastLogin.upstreamCode,scenario.code);
+      assert.equal(diag.authenticated,scenario.status===200);
+      assert.equal(raw.includes(secret),false);
+      assert.equal(raw.includes('secret-password'),false);
+      assert.equal(raw.includes('user1'),false);
+    } finally {
+      await new Promise(resolve => srv.close(resolve));
+    }
+  }
+});
