@@ -9,7 +9,7 @@
   <title>SSAMCAFE Web — 개인용 조회 클라이언트</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="style.css" />
-  <script defer src="app.js?v=20261116-diagnostics-v3"></script>
+  <script defer src="app.js?v=20261116-diagnostics-v4"></script>
 </head>
 <body>
   <div class="shell">
@@ -21,14 +21,14 @@
         <button class="nav-item" data-view="seats"><span class="nav-icon">▦</span>좌석 현황</button>
         <button class="nav-item" data-view="tickets"><span class="nav-icon">▤</span>이용권 정보</button>
       </nav>
-      <div class="sidebar-bottom"><div class="prototype-tag"><span class="prototype-dot"></span>비공식 · 읽기 전용</div><p>쌤카페에서 제공하는 공식 서비스가 아닙니다.</p><button id="settings-nav" class="side-setting"><span aria-hidden="true">⚙</span> 데이터 연결 설정</button><a class="official-link" href="/api/diagnostics" target="_blank" rel="noopener noreferrer">서버 조회 진단 열기 (민감정보 제외)</a></div>
+      <div class="sidebar-bottom"><div class="prototype-tag"><span class="prototype-dot"></span>비공식 · 읽기 전용</div><p>쌤카페에서 제공하는 공식 서비스가 아닙니다.</p><button id="settings-nav" class="side-setting"><span aria-hidden="true">⚙</span> 데이터 연결 설정</button><button class="official-link" type="button" id="open-diagnostics-sidebar">서버 조회 진단 열기 (현재 화면)</button></div>
     </aside>
     <main class="main">
       <header class="topbar"><div class="topbar-left"><span class="mobile-mark">S.</span><span class="breadcrumb">MY WORKSPACE <span class="slash">/</span> <span id="breadcrumb">대시보드</span></span></div><div class="top-actions"><span id="mode-pill" class="mode-pill"><span class="pill-dot"></span>예시 데이터</span><button id="refresh" class="icon-button" aria-label="데이터 새로고침" title="데이터 새로고침">⟳</button><button id="settings" class="icon-button" aria-label="데이터 설정" title="데이터 설정">⚙</button></div></header>
       <div class="content">
         <section id="view-home" class="view active">
           <div class="page-heading"><div><div class="eyebrow">STUDY OVERVIEW</div><h1>내 학습 공간</h1><p>좌석과 이용권 상태를 한곳에서 확인하세요.</p></div><span class="today" id="today"></span></div>
-          <div class="notice" role="status"><span class="notice-icon">ⓘ</span><p id="notice-text"><strong>예시 화면입니다.</strong> 쌤카페 실시간 서버와 연결되어 있지 않습니다. 데이터 파일을 불러오거나 사용자 소유 API에 연결해 확인할 수 있습니다.</p><button id="connect-cta">데이터 연결 <span aria-hidden="true">↗</span></button></div><div class="notice mini"><span class="notice-icon">ⓘ</span><p id="lookup-summary" role="status">현재 실제 회원정보 조회 결과가 없습니다. 로그인 후 조회 상태가 표시됩니다.</p><a href="/api/diagnostics" target="_blank" rel="noopener noreferrer">조회 진단</a></div>
+          <div class="notice" role="status"><span class="notice-icon">ⓘ</span><p id="notice-text"><strong>예시 화면입니다.</strong> 쌤카페 실시간 서버와 연결되어 있지 않습니다. 데이터 파일을 불러오거나 사용자 소유 API에 연결해 확인할 수 있습니다.</p><button id="connect-cta">데이터 연결 <span aria-hidden="true">↗</span></button></div><div class="notice mini"><span class="notice-icon">ⓘ</span><p id="lookup-summary" role="status">현재 실제 회원정보 조회 결과가 없습니다. 로그인 후 조회 상태가 표시됩니다.</p><button type="button" id="open-diagnostics-home">조회 진단</button></div><section class="panel diagnosis-panel" id="diagnostics-panel" hidden><h2>서버 연결 · 회원정보 진단</h2><p id="diagnostics-summary" role="status">진단을 시작합니다.</p><pre id="diagnostics-details" class="diagnostics-details"></pre><button type="button" id="diagnostics-refresh">다시 진단</button><p class="input-hint">비밀번호 및 인증 토큰은 표시하지 않습니다. 진단 결과는 현재 브라우저 세션의 정보입니다.</p></section>
           <div class="overview-cards">
             <article class="overview-card main-card"><div class="card-top"><span>내 좌석</span><span class="light-tag">SEAT</span></div><div class="big-value" id="my-seat">—</div><div class="muted" id="my-seat-detail">좌석 정보 없음</div><div class="metric-line"><span class="tiny-diamond"></span><span id="my-seat-status">연결 확인 필요</span></div></article>
             <article class="overview-card"><div class="card-top"><span>잔여 이용시간</span><span class="light-tag">TIME LEFT</span></div><div class="big-value" id="time-left">—</div><div class="muted" id="ticket-name">이용권 정보 없음</div><div class="progress-track"><div class="progress-inner" id="time-progress"></div></div></article>
