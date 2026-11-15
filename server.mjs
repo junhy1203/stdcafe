@@ -150,7 +150,7 @@ function asArray(value) {
   if (typeof value === 'string' && value.length <= LIMIT) {
     try { value = JSON.parse(value); } catch { return []; }
   }
-  return Array.isArray(value) ? value.filter(v=>asObject(v)).slice(0,60) : [];
+  return Array.isArray(value) ? value.map(v=>asObject(v)).filter(Boolean).slice(0,60) : [];
 }
 function readable(v, max=140) {
   if (typeof v !== 'string' && typeof v !== 'number') return '';
