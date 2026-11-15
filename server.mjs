@@ -12,7 +12,7 @@ import path from 'node:path';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-envelope-check-v6';
+const APP_VERSION = '2026-11-16-home-api-v7';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -136,6 +136,77 @@ function asStatus(sources, name) {
     updatedAt: new Date().toISOString(),
     live: { name, sources, note: '실제 HTML에서 명확하게 확인 가능한 값만 자동 추출합니다.' },
   };
+}
+
+
+function asObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.length <= LIMIT) {
+    try { const v=JSON.parse(value); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch {}
+  }
+  return null;
+}
+function asArray(value) {
+  if (typeof value === 'string' && value.length <= LIMIT) {
+    try { value = JSON.parse(value); } catch { return []; }
+  }
+  return Array.isArray(value) ? value.filter(v=>asObject(v)).slice(0,60) : [];
+}
+function readable(v, max=140) {
+  if (typeof v !== 'string' && typeof v !== 'number') return '';
+  return String(v).trim().slice(0,max);
+}
+function validMinutes(v) {
+  // Fields carrying remaining time are tentatively interpreted as minute counts.
+  // Do not interpret arbitrary REMAIN_PERIOD values as minutes.
+  const raw=readable(v,16);
+  if(!/^\d{1,6}$/.test(raw))return null;
+  const n=Number(raw);
+  return Number.isSafeInteger(n) && n<=999999 ? n : null;
+}
+function extractStructuredData(home, goods, fallback) {
+  const h=asObject(home)||{};
+  const g=asObject(goods)||{};
+  const recent=asArray(h.recent_shop_use_list);
+  const goodsList=asArray(g.lsat_goods_use_info);
+  // Home shop and recent shop are different concepts. Never label nearby shops as linked.
+  const currentName=readable(h.home_shop_name);
+  const currentNumber=readable(h.home_shop_no,40);
+  const recentStores=recent.map(v=>({
+    name:readable(v.SHOP_NAME),shopNo:readable(v.SHOP_NO,40),
+    goodsName:readable(v.GOODS_NAME),goodsType:readable(v.GOODS_TYPE,35),
+    remainingRaw:readable(v.REMAINTIME,40),useState:readable(v.USE_STATE,35)
+  })).filter(v=>v.name||v.goodsName);
+  const tickets=goodsList.map(v=>({
+    shopName:readable(v.SHOP_NAME),shopNo:readable(v.SHOP_NO,40),
+    goodsName:readable(v.GOODS_NAME),goodsType:readable(v.GOODS_TYPE,35),
+    remainingPeriod:readable(v.REMAIN_PERIOD,50),seatState:readable(v.SEAT_STATE,35)
+  })).filter(v=>v.shopName||v.goodsName||v.remainingPeriod);
+  const currentRecent=recentStores.find(v=>currentNumber&&v.shopNo===currentNumber)
+    || recentStores.find(v=>currentName&&v.name===currentName);
+  const currentTicket=tickets.find(v=>currentNumber&&v.shopNo===currentNumber)
+    || tickets.find(v=>currentName&&v.shopName===currentName);
+  const chosenTicket=currentTicket||tickets[0];
+  const chosenRecent=currentRecent||recentStores[0];
+  const inferredMinutes=validMinutes(h.home_shop_user_remain_m)
+    ?? validMinutes(currentRecent?.remainingRaw)
+    ?? (currentName || currentNumber ? null : validMinutes(chosenRecent?.remainingRaw));
+  const confirmedStoreName=currentName||chosenTicket?.shopName||chosenRecent?.name||'';
+  const result=asStatus(fallback,'');
+  result.store={
+    name:confirmedStoreName||'매장 정보 미확인',
+    address:confirmedStoreName?'주소 미조회':'앱 홈 API에서 매장 정보를 찾지 못했습니다.'
+  };
+  result.member.ticket={
+    name:chosenTicket?.goodsName||chosenRecent?.goodsName||'이용권 정보 미확인',
+    remainingMinutes:inferredMinutes??result.member.ticket.remainingMinutes,
+    totalMinutes:null
+  };
+  result.live.currentShop={name:currentName,shopNo:currentNumber};
+  result.live.recentShops=recentStores;
+  result.live.ticketItems=tickets;
+  result.live.homeValues={remainingRaw:readable(h.home_shop_user_remain_m,40),recentCount:recentStores.length,ticketsCount:tickets.length};
+  return result;
 }
 
 function parseCookie(header) {
@@ -294,7 +365,35 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               return [kind, { ok: true, text: parsed }];
             } catch (e) { return [kind, { ok: false, error: e.message.startsWith('쌤카페 서버') ? e.message : '페이지 조회 실패' }]; }
           }));
-          const result = asStatus(Object.fromEntries(entries), s.name);
+          // Native app: cmd 1100 returns current/home shop and recently used shop data.
+          // cmd 1101 returns last goods use records. These are structured app responses.
+          async function readAppData(cmd, fields={}) {
+            try {
+              const remote=await upstream(UPSTREAM+'/api/app.do',{
+                method:'POST',
+                headers:{'Content-Type':'application/json',Accept:'application/json'},
+                body:JSON.stringify({cmd,m_value:s.device,tk:s.token,...fields})
+              },s.jar);
+              const payload=upstreamPayload(remote.text);
+              if(String(payload.rspcode??'')!=='0000')
+                return {ok:false,reason:'API 응답코드 '+readable(payload.rspcode,16)};
+              return {ok:true,payload};
+            }catch(e) {
+              return {ok:false,reason:e.status?'서버 응답 오류':'응답 해석 실패'};
+            }
+          }
+          const [home,goods]=await Promise.all([
+            readAppData('1100',{latitude:'0',longitude:'0'}),
+            readAppData('1101')
+          ]);
+          const sources=Object.fromEntries(entries);
+          const result=extractStructuredData(home.ok?home.payload:null, goods.ok?goods.payload:null, sources);
+          result.live.name=s.name;
+          result.live.sources=sources;
+          result.live.apis={
+            home:{ok:home.ok,reason:home.ok?'':home.reason},
+            goods:{ok:goods.ok,reason:goods.ok?'':goods.reason}
+          };
           const pages = Object.fromEntries(entries.map(([kind, info]) => [kind, {
             ok: info.ok,
             characters: info.ok ? info.text.length : 0,
@@ -303,11 +402,16 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           s.lastDiagnostic = {
             checkedAt: new Date(now()).toISOString(),
             pages,
+            apis: result.live.apis,
             summary: {
               pagesLoaded: Object.values(pages).filter(p => p.ok).length,
               seatFound: !!result.member.seat,
               remainingTimeFound: Number.isFinite(result.member.ticket.remainingMinutes),
               seatLayoutFound: result.seats.length > 0,
+              shopFound: result.store.name !== '매장 정보 미확인',
+              ticketFound: result.live.ticketItems.length > 0,
+              homeApiSucceeded: home.ok,
+              goodsApiSucceeded: goods.ok,
             },
           };
           return response(res, 200, result);
