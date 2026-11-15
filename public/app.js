@@ -181,6 +181,26 @@ async function requestJson(url,options={}){
   return obj;
 }
 
+const loginStageNames = {
+  started:'로그인 요청 시작',
+  rate_limited:'연속 로그인 제한에 도달',
+  connecting_to_upstream:'쌤카페 서버에 로그인 요청 전송 중',
+  upstream_connection_failed:'쌤카페 서버 연결 실패',
+  upstream_responded:'쌤카페 서버가 응답함',
+  upstream_response_unrecognized:'로그인 응답 구조를 인식하지 못함',
+  upstream_rejected:'쌤카페 서버가 로그인을 거부함',
+  additional_auth_required:'앱 추가 인증 또는 기기 등록이 필요할 가능성',
+  authenticated:'로그인 API 인증 성공'
+};
+function loginTraceText(attempt){
+  if(!attempt)return '이번 서버 실행 중 로그인 요청 기록이 없습니다.';
+  const stage=loginStageNames[attempt.stage]||'알 수 없는 로그인 처리 단계';
+  const info=[];
+  if(attempt.upstreamCode!==null)info.push('응답 코드: '+attempt.upstreamCode);
+  if(attempt.secondFactorAccepted!==null)info.push('추가 인증 조건: '+(attempt.secondFactorAccepted?'충족':'미충족'));
+  if(attempt.tokenProvided!==null)info.push('인증 토큰 발급: '+(attempt.tokenProvided?'확인':'확인되지 않음'));
+  return stage+(info.length?' · '+info.join(' · '):'');
+}
 const diagNames = {profile:'내 정보',seats:'좌석 현황',tickets:'이용권',history:'이용 내역'};
 function setDiagFeedback(message){setText('diagnostics-feedback',message);}
 function showDiagnosticResult(data, sessionResponse){
@@ -190,6 +210,10 @@ function showDiagnosticResult(data, sessionResponse){
   setText('diagnostics-loaded',last?.summary ? String(last.summary.pagesLoaded)+'/4개' : '조회 기록 없음');
   setText('diagnostics-time',last?.checkedAt?safeDate(last.checkedAt):'—');
   const parent=$('diagnostics-pages');parent.replaceChildren();
+  const loginItem=document.createElement('div');loginItem.className='diagnostics-page-item';
+  const loginTitle=document.createElement('strong');loginTitle.textContent='최근 로그인 시도';
+  const loginText=document.createElement('span');loginText.textContent=loginTraceText(data.lastLogin);
+  loginItem.append(loginTitle,loginText);parent.appendChild(loginItem);
   const cookieInfo = sessionResponse?.session || data.session;
   const cookieStatus = document.createElement('div');cookieStatus.className='diagnostics-page-item';
   const cookieTitle=document.createElement('strong');cookieTitle.textContent='브라우저 세션 쿠키';
@@ -203,7 +227,7 @@ function showDiagnosticResult(data, sessionResponse){
   const bootText=document.createElement('span');bootText.textContent=cookieInfo?.serverStartedAt?safeDate(cookieInfo.serverStartedAt):'확인할 수 없음';
   boot.append(bootTitle,bootText);parent.appendChild(boot);
   if(!data.authenticated){
-    setDiagFeedback('로그인 세션이 현재 서버에 없습니다. 위 쿠키 상태를 확인하고 같은 Safari 탭에서 다시 로그인해 주세요.');
+    setDiagFeedback(data.lastLogin ? '계정 인증이 완료되지 않았습니다. 아래 최근 로그인 시도에서 어느 단계가 실패했는지 확인해 주세요.' : '이 서버 실행 중 로그인 요청 기록이 없습니다. 설정에서 로그인해 주세요.');
   }else if(!last){
     setDiagFeedback('로그인 상태는 확인됐지만 회원정보 조회 기록이 없습니다. 회원 데이터 다시 조회를 눌러 보세요.');
   }else{
@@ -362,7 +386,17 @@ $('bridge-login-form').addEventListener('submit',async(e)=>{
     const loaded=await fetchLive();
     if(!loaded)return;
     hideModal();
-  }catch(err){bridgeError(err.message);bridgeStatus('로그인 또는 서버 연동 실패');}
+  }catch(err){
+    let explanation=err.message;
+    try {
+      const d=await requestJson('/api/diagnostics');
+      if(d.lastLogin)explanation+='\n진단: '+loginTraceText(d.lastLogin);
+      showDiagnosticResult(d);
+    }catch{}
+    bridgeError(explanation);
+    bridgeStatus('로그인 API 또는 인증 세션 처리 실패 · 아래 진단을 확인하세요');
+    lookupSummary('계정 로그인에 실패했습니다. 설정의 오류 메시지와 진단 모드의 최근 로그인 시도를 확인하세요.');
+  }
   finally{btn.disabled=false;btn.textContent='로그인 후 실제 데이터 조회';}
 });
 $('bridge-logout').addEventListener('click',async()=>{
