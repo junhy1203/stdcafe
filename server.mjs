@@ -12,7 +12,7 @@ import path from 'node:path';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-login-trace-v5';
+const APP_VERSION = '2026-11-16-envelope-check-v6';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -50,10 +50,30 @@ export function loginPayload(username, password, device) {
 
 function upstreamPayload(raw) {
   const outer = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  if (!outer || typeof outer !== 'object') throw new Error('로그인 응답이 JSON 객체가 아닙니다.');
+  if (!outer || typeof outer !== 'object' || Array.isArray(outer)) throw new Error('로그인 응답이 JSON 객체가 아닙니다.');
+  const payloadType = typeof outer.result === 'string' ? 'json-string' : typeof outer.result === 'object' ? 'object' : 'missing';
   const result = typeof outer.result === 'string' ? JSON.parse(outer.result) : outer.result;
   if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('로그인 응답의 result 구조를 확인하지 못했습니다.');
-  return result;
+  const resultCode = result.rspcode == null ? null : String(result.rspcode);
+  const outerCode = outer.rspcode == null ? null : String(outer.rspcode);
+  // Never override an explicit rejection with a success code from another envelope level.
+  if (resultCode !== null && outerCode !== null && resultCode !== outerCode) {
+    throw new Error('상위 응답 코드와 결과 응답 코드가 일치하지 않습니다.');
+  }
+  const code = resultCode ?? outerCode;
+  const safeKeys = obj => Object.keys(obj).filter(k => /^[A-Za-z][A-Za-z0-9_]{0,35}$/.test(k)).slice(0, 24);
+  return {
+    ...result,
+    rspcode: code,
+    rspmsg: result.rspmsg ?? outer.rspmsg,
+    __meta: {
+      codeLocation: resultCode !== null ? 'result' : outerCode !== null ? 'outer' : 'missing',
+      resultType: payloadType,
+      resultKeys: safeKeys(result),
+      outerKeys: safeKeys(outer),
+      rescode: result.rescode == null && outer.rescode == null ? null : String(result.rescode ?? outer.rescode).slice(0, 16).replace(/[^A-Za-z0-9_-]/g, '')
+    }
+  };
 }
 
 async function limitedText(resp) {
@@ -208,7 +228,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
         if (pathname === '/api/diagnostics' && req.method === 'GET') return response(res, 200, { version: APP_VERSION, authenticated: !!s.token, lastCheck: s.lastDiagnostic, session: sessionInfo, lastLogin: s.lastLogin });
         if (pathname === '/api/login' && req.method === 'POST') {
           checkMutation(req, s);
-          const loginTrace = { checkedAt: new Date(now()).toISOString(), stage: 'started', upstreamCode: null, secondFactorAccepted: null, tokenProvided: null };
+          const loginTrace = { checkedAt: new Date(now()).toISOString(), stage: 'started', upstreamCode: null, codeLocation: null, resultType: null, rescode: null, resultKeys: [], outerKeys: [], secondFactorAccepted: null, tokenProvided: null };
           s.lastLogin = loginTrace;
           const key = req.socket.remoteAddress || 'unknown';
           const recent = (attempts.get(key) || []).filter(t => now() - t < 300_000);
@@ -232,15 +252,20 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           try { result = upstreamPayload(text); }
           catch {
             loginTrace.stage = 'upstream_response_unrecognized';
-            throw createError(502, '로그인 응답 형식이 APK 분석 결과와 다릅니다.');
+            throw createError(502, '로그인 응답 형식 또는 성공 코드 위치가 예상과 다릅니다.');
           }
           // Only store non-secret, bounded protocol metadata. Never store user ID, password, raw response, or token.
           loginTrace.upstreamCode = String(result.rspcode ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 16) || null;
+          loginTrace.codeLocation = result.__meta.codeLocation;
+          loginTrace.resultType = result.__meta.resultType;
+          loginTrace.rescode = result.__meta.rescode;
+          loginTrace.resultKeys = result.__meta.resultKeys;
+          loginTrace.outerKeys = result.__meta.outerKeys;
           loginTrace.secondFactorAccepted = String(result.s_value ?? '').toUpperCase() === 'Y';
           loginTrace.tokenProvided = Boolean(result.a_value);
           if (String(result.rspcode ?? '') !== '0000') {
-            loginTrace.stage = 'upstream_rejected';
-            throw createError(401, clean(result.rspmsg || result.resmsg || '쌤카페 서버가 로그인을 거부했습니다.'));
+            loginTrace.stage = result.rspcode === null ? 'success_code_missing' : 'upstream_rejected';
+            throw createError(401, clean(result.rspmsg || result.resmsg || (result.rspcode === null ? '서버 응답에서 로그인 성공 코드를 찾지 못했습니다.' : '쌤카페 서버가 로그인을 거부했습니다.')));
           }
           if (!loginTrace.secondFactorAccepted || !loginTrace.tokenProvided) {
             loginTrace.stage = 'additional_auth_required';
