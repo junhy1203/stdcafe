@@ -308,3 +308,38 @@ test('native structured home API shows real current cafe, recent cafes, and pass
     assert.equal(calls.length,3);
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+test('cached HTML shell without structured panel is repaired without a null error', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const frontend = await readFile(new URL('../public/app.js', import.meta.url),'utf8');
+  const start = frontend.indexOf('function ensureStructuredPanel(){');
+  const end = frontend.indexOf('\nfunction clearLiveSources(){',start);
+  assert.ok(start>=0 && end>start,'missing structured-panel recovery function');
+  function element(tag,id='') {
+    return {
+      tagName:tag,id,children:[],parentNode:null,hidden:false,
+      append(...items){for(const child of items){child.parentNode=this;this.children.push(child)}},
+      appendChild(child){this.append(child)},
+      insertBefore(child,other){const index=this.children.indexOf(other);assert.ok(index>=0);child.parentNode=this;this.children.splice(index,0,child)},
+      remove(){if(this.parentNode)this.parentNode.children=this.parentNode.children.filter(x=>x!==this);this.parentNode=null}
+    };
+  }
+  const home=element('section','view-home');
+  const live=element('section','live-panel');home.append(live);
+  function search(root,id) {
+    if(root.id===id)return root;
+    for(const child of root.children){const found=search(child,id);if(found)return found;}
+    return null;
+  }
+  const document={createElement:tag=>element(tag)};
+  const $=id=>search(home,id);
+  const recover=new Function('document','$',frontend.slice(start,end)+'\nreturn ensureStructuredPanel;')(document,$);
+  const panel=recover();
+  assert.equal(panel.id,'structured-home-panel');
+  assert.equal(panel.hidden,true);
+  assert.equal($('structured-stores')?.id,'structured-stores');
+  assert.equal($('structured-tickets')?.id,'structured-tickets');
+  assert.equal(home.children[0],panel);
+  assert.equal(home.children[1],live);
+  assert.equal(recover(),panel,'must not recreate an existing panel');
+});
