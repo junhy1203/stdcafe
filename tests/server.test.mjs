@@ -62,7 +62,7 @@ test('mocked login, 4 member pages, logout, CSRF, no token leaks, static allowli
     assert.equal(out.seats.length, 0);
     assert.equal(raw.includes(secret), false);
     assert.equal(raw.includes('LEAK ME'), false);
-    assert.equal(requests.length, 5);
+    assert.equal(requests.length, 7);
     for (const p of ['/server.mjs','/tests/server.test.mjs','/deploy/install.sh','/README.md','/.git/config']) assert.equal((await visit(p)).status, 404);
     assert.equal((await visit('/app.js')).status, 200);
     assert.equal((await visit('/api/logout',{ method:'POST', headers: { 'X-CSRF-Token': csrf } })).status, 200);
@@ -245,4 +245,66 @@ test('login envelope code locations and missing codes', async () => {
       if(scenario.name==='missing rspcode despite token')assert.equal(diag.lastLogin.rescode,'0000');
     }finally{await new Promise(resolve=>server.close(resolve))}
   }
+});
+
+test('native structured home API shows real current cafe, recent cafes, and pass names', async () => {
+  const calls=[];
+  const fakeFetch=async(url,opts)=>{
+    const path=new URL(url).pathname;
+    if(path==='/api/app.do'){
+      const v=JSON.parse(opts.body);
+      calls.push(v);
+      if(v.cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'TEST_TOKEN',name:'Test Member'}}),'application/json');
+      if(v.cmd==='1100'){
+        assert.equal(v.tk,'TEST_TOKEN');
+        assert.equal(v.latitude,'0');assert.equal(v.longitude,'0');
+        return mkResponse(JSON.stringify({rspcode:'0000',result:{
+          home_shop_no:'SHOP12',home_shop_name:'실제 앱 홈 매장',
+          home_shop_user_remain_m:'125',
+          recent_shop_use_list_cnt:1,
+          recent_shop_use_list:[{SHOP_NO:'SHOP12',SHOP_NAME:'실제 앱 홈 매장',GOODS_NAME:'10시간권',REMAINTIME:'125',GOODS_TYPE:'TIME',USE_STATE:'Y'}]
+        }}),'application/json');
+      }
+      if(v.cmd==='1101'){
+        assert.equal(v.tk,'TEST_TOKEN');
+        return mkResponse(JSON.stringify({rspcode:'0000',result:{
+          lsat_goods_use_info_cnt:1,
+          lsat_goods_use_info:JSON.stringify([{SHOP_NO:'SHOP12',SHOP_NAME:'실제 앱 홈 매장',GOODS_NAME:'10시간권',GOODS_TYPE:'TIME',REMAIN_PERIOD:'7',SEAT_STATE:'Y'}])
+        }}),'application/json');
+      }
+      throw Error('Unexpected app cmd: '+v.cmd);
+    }
+    return mkResponse('<html><body><div>정보 없음</div></body></html>');
+  };
+  const server=createApp({fetchImpl:fakeFetch});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const init=await fetch(base+'/api/session');
+    const csrf=(await init.json()).csrf;
+    const Cookie=init.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'member',password:'test'})});
+    assert.equal(login.status,200);
+    const status=await fetch(base+'/api/status',{headers:{Cookie}});
+    assert.equal(status.status,200);
+    const body=await status.text();
+    const data=JSON.parse(body);
+    assert.equal(data.store.name,'실제 앱 홈 매장');
+    assert.equal(data.member.ticket.name,'10시간권');
+    assert.equal(data.member.ticket.remainingMinutes,125);
+    assert.equal(data.live.currentShop.shopNo,'SHOP12');
+    assert.equal(data.live.recentShops.length,1);
+    assert.equal(data.live.ticketItems.length,1);
+    assert.equal(data.live.ticketItems[0].remainingPeriod,'7');
+    assert.equal(data.live.apis.home.ok,true);
+    assert.equal(data.live.apis.goods.ok,true);
+    assert.equal(body.includes('TEST_TOKEN'),false);
+    const diag=await fetch(base+'/api/diagnostics',{headers:{Cookie}});
+    const diagObj=await diag.json();
+    assert.equal(diagObj.lastCheck.summary.homeApiSucceeded,true);
+    assert.equal(diagObj.lastCheck.summary.goodsApiSucceeded,true);
+    assert.equal(diagObj.lastCheck.summary.shopFound,true);
+    assert.equal(diagObj.lastCheck.summary.ticketFound,true);
+    assert.equal(calls.length,3);
+  }finally{await new Promise(resolve=>server.close(resolve))}
 });
