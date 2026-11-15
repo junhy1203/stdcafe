@@ -148,3 +148,35 @@ test('generic success-only pages are reported as failed data extraction, with re
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+test('Safari session cookie continuity and stale sessions after restart', async () => {
+  const first = createApp();
+  await new Promise(resolve => first.listen(0, '127.0.0.1', resolve));
+  let cookie;
+  const addr='http://127.0.0.1:'+first.address().port;
+  try {
+    const response=await fetch(addr+'/api/session');
+    const data=await response.json();
+    assert.equal(data.authenticated,false);
+    assert.equal(data.session.cookieSent,false);
+    assert.equal(data.session.cookieRecognized,false);
+    assert.match(response.headers.get('set-cookie'), /SameSite=Lax/);
+    cookie=response.headers.get('set-cookie').split(';')[0];
+    const another=await fetch(addr+'/api/session',{headers:{Cookie:cookie}});
+    const known=await another.json();
+    assert.equal(known.session.cookieSent,true);
+    assert.equal(known.session.cookieRecognized,true);
+    assert.equal(known.csrf,data.csrf);
+    assert.ok(known.session.serverStartedAt);
+  } finally {await new Promise(resolve=>first.close(resolve));}
+  const restarted=createApp();
+  await new Promise(resolve=>restarted.listen(0,'127.0.0.1',resolve));
+  try {
+    const fresh=await fetch('http://127.0.0.1:'+restarted.address().port+'/api/session',{headers:{Cookie:cookie}});
+    const data=await fresh.json();
+    assert.equal(data.authenticated,false);
+    assert.equal(data.session.cookieSent,true);
+    assert.equal(data.session.cookieRecognized,false);
+    assert.ok(fresh.headers.get('set-cookie'));
+  } finally {await new Promise(resolve=>restarted.close(resolve));}
+});
