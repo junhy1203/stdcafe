@@ -12,7 +12,7 @@ import path from 'node:path';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-session-check-v4';
+const APP_VERSION = '2026-11-16-login-trace-v5';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -173,7 +173,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
     for (const [id, sess] of sessions) if (t - sess.last >= TTL_MS) sessions.delete(id);
     if (sessions.size >= 100) throw createError(503, '동시 사용자가 너무 많습니다.');
     const key = rand();
-    s = { sid: key, csrf: rand(24), device: randomBytes(8).toString('hex'), last: t, token: '', name: '', jar: new Map(), lastDiagnostic: null };
+    s = { sid: key, csrf: rand(24), device: randomBytes(8).toString('hex'), last: t, token: '', name: '', jar: new Map(), lastDiagnostic: null, lastLogin: null };
     sessions.set(key, s);
     const secure = req.socket.encrypted ? '; Secure' : '';
     res.setHeader('Set-Cookie', `${COOKIE}=${key}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TTL_MS/1000}${secure}`);
@@ -204,30 +204,54 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
         const s = getSession(req, res);
         const cookieRecognized = Boolean(presentedCookie && presentedCookie === s.sid);
         const sessionInfo = { cookieSent: Boolean(presentedCookie), cookieRecognized, serverStartedAt: startedAt };
-        if (pathname === '/api/session' && req.method === 'GET') return response(res, 200, { authenticated: !!s.token, name: s.token ? s.name : '', csrf: s.csrf, mode: 'WireGuard private, read-only', upstreamVerified: false, version: APP_VERSION, session: sessionInfo });
-        if (pathname === '/api/diagnostics' && req.method === 'GET') return response(res, 200, { version: APP_VERSION, authenticated: !!s.token, lastCheck: s.lastDiagnostic, session: sessionInfo });
+        if (pathname === '/api/session' && req.method === 'GET') return response(res, 200, { authenticated: !!s.token, name: s.token ? s.name : '', csrf: s.csrf, mode: 'WireGuard private, read-only', upstreamVerified: false, version: APP_VERSION, session: sessionInfo, lastLogin: s.lastLogin });
+        if (pathname === '/api/diagnostics' && req.method === 'GET') return response(res, 200, { version: APP_VERSION, authenticated: !!s.token, lastCheck: s.lastDiagnostic, session: sessionInfo, lastLogin: s.lastLogin });
         if (pathname === '/api/login' && req.method === 'POST') {
           checkMutation(req, s);
+          const loginTrace = { checkedAt: new Date(now()).toISOString(), stage: 'started', upstreamCode: null, secondFactorAccepted: null, tokenProvided: null };
+          s.lastLogin = loginTrace;
           const key = req.socket.remoteAddress || 'unknown';
           const recent = (attempts.get(key) || []).filter(t => now() - t < 300_000);
-          if (recent.length >= 20) throw createError(429, '로그인 요청 제한(5분에 20회)입니다.');
+          if (recent.length >= 20) { loginTrace.stage = 'rate_limited'; throw createError(429, '로그인 요청 제한(5분에 20회)입니다.'); }
           recent.push(now()); attempts.set(key, recent);
           const v = await bodyJson(req);
           if (typeof v.username !== 'string' || !v.username.trim() || v.username.length > 120 || typeof v.password !== 'string' || !v.password || v.password.length > 250 || (v.deviceId !== undefined && (typeof v.deviceId !== 'string' || v.deviceId.length < 8 || v.deviceId.length > 128))) throw createError(400, '로그인 입력값을 확인하세요.');
           s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null;
           if (v.deviceId) s.device = v.deviceId;
           const payload = loginPayload(v.username.trim(), v.password, s.device);
-          const { text } = await upstream(`${UPSTREAM}/api/app.do`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) }, s.jar);
+          loginTrace.stage = 'connecting_to_upstream';
+          let text;
+          try {
+            ({ text } = await upstream(`${UPSTREAM}/api/app.do`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) }, s.jar));
+          } catch (e) {
+            loginTrace.stage = 'upstream_connection_failed';
+            throw e;
+          }
+          loginTrace.stage = 'upstream_responded';
           let result;
           try { result = upstreamPayload(text); }
-          catch { throw createError(502, '로그인 응답 형식이 APK 분석 결과와 다릅니다.'); }
-          if (String(result.rspcode ?? '') !== '0000') throw createError(401, clean(result.rspmsg || result.resmsg || '서버가 로그인을 거부했습니다.'));
-          if (String(result.s_value ?? '').toUpperCase() !== 'Y' || !result.a_value) throw createError(409, '앱 추가 인증 또는 기기 등록이 필요한 상태일 수 있습니다.');
+          catch {
+            loginTrace.stage = 'upstream_response_unrecognized';
+            throw createError(502, '로그인 응답 형식이 APK 분석 결과와 다릅니다.');
+          }
+          // Only store non-secret, bounded protocol metadata. Never store user ID, password, raw response, or token.
+          loginTrace.upstreamCode = String(result.rspcode ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 16) || null;
+          loginTrace.secondFactorAccepted = String(result.s_value ?? '').toUpperCase() === 'Y';
+          loginTrace.tokenProvided = Boolean(result.a_value);
+          if (String(result.rspcode ?? '') !== '0000') {
+            loginTrace.stage = 'upstream_rejected';
+            throw createError(401, clean(result.rspmsg || result.resmsg || '쌤카페 서버가 로그인을 거부했습니다.'));
+          }
+          if (!loginTrace.secondFactorAccepted || !loginTrace.tokenProvided) {
+            loginTrace.stage = 'additional_auth_required';
+            throw createError(409, '쌤카페 로그인 응답에 앱 추가 인증 또는 기기 등록이 필요하다고 표시됐습니다.');
+          }
           s.token = String(result.a_value); s.name = String(result.name || '회원').slice(0, 80);
+          loginTrace.stage = 'authenticated';
           return response(res, 200, { authenticated: true, name: s.name });
         }
         if (pathname === '/api/logout' && req.method === 'POST') {
-          checkMutation(req, s); s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null;
+          checkMutation(req, s); s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null; s.lastLogin = null;
           return response(res, 200, { ok: true });
         }
         if (pathname === '/api/status' && req.method === 'GET') {
