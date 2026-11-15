@@ -1,0 +1,17 @@
+{
+  "store": {"name":"샘플 스터디카페", "address":"이 데이터는 예시이며 실제 매장을 나타내지 않습니다."},
+  "member": {"seat":"A12", "seatDetail":"자유석 · A구역", "ticket":{"name":"시간권", "remainingMinutes":385, "totalMinutes":900}},
+  "seats": [
+    {"id":"A01","status":"available"},{"id":"A02","status":"available"},{"id":"A03","status":"occupied"},
+    {"id":"A04","status":"available"},{"id":"A05","status":"disabled"},{"id":"A06","status":"occupied"},
+    {"id":"A07","status":"available"},{"id":"A08","status":"available"},{"id":"A09","status":"occupied"},
+    {"id":"A10","status":"occupied"},{"id":"A11","status":"available"},{"id":"A12","status":"mine"},
+    {"id":"A13","status":"available"},{"id":"A14","status":"available"},{"id":"A15","status":"available"},
+    {"id":"A16","status":"occupied"},{"id":"A17","status":"occupied"},{"id":"A18","status":"available"},
+    {"id":"A19","status":"available"},{"id":"A20","status":"occupied"},{"id":"A21","status":"occupied"},
+    {"id":"A22","status":"available"},{"id":"A23","status":"available"},{"id":"A24","status":"occupied"},
+    {"id":"A25","status":"available"},{"id":"A26","status":"available"},{"id":"A27","status":"disabled"},
+    {"id":"A28","status":"available"},{"id":"A29","status":"occupied"},{"id":"A30","status":"available"}
+  ],
+  "updatedAt":"2026-11-16T00:00:00+09:00"
+}
