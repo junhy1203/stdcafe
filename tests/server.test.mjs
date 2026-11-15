@@ -114,3 +114,37 @@ test('login rate limit allows 20 requests in 5 minutes and blocks the 21st', asy
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+test('generic success-only pages are reported as failed data extraction, with redacted diagnostics', async () => {
+  const secret = 'SECRET_DIAGNOSTIC_TEST_TOKEN';
+  const fakeFetch = async (u) => new URL(u).pathname === '/api/app.do'
+    ? mkResponse(JSON.stringify({ result: { rspcode: '0000', s_value: 'Y', a_value: secret, name: '테스트' } }), 'application/json')
+    : mkResponse('<html><body>성공</body></html>');
+  const server = createApp({ fetchImpl: fakeFetch });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const initial = await fetch(base + '/api/session');
+    const csrf = (await initial.json()).csrf;
+    const Cookie = initial.headers.get('set-cookie').split(';')[0];
+    const login = await fetch(base + '/api/login', { method: 'POST', headers: { Cookie, 'Content-Type':'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ username: 'demo', password:'test' }) });
+    assert.equal(login.status, 200);
+    const status = await fetch(base + '/api/status', { headers: { Cookie } });
+    assert.equal(status.status, 200);
+    const data = await status.json();
+    assert.equal(data.member.seat, null);
+    assert.equal(data.member.ticket.remainingMinutes, null);
+    assert.ok(Object.values(data.live.sources).every(page => !page.ok && /성공 문구만 반환/.test(page.error)));
+    const diagnosticResponse = await fetch(base + '/api/diagnostics', { headers: { Cookie } });
+    assert.equal(diagnosticResponse.status, 200);
+    const diagnosticString = await diagnosticResponse.text();
+    const diagnostic = JSON.parse(diagnosticString);
+    assert.equal(diagnostic.authenticated, true);
+    assert.equal(diagnostic.lastCheck.summary.pagesLoaded, 0);
+    assert.equal(diagnostic.lastCheck.summary.remainingTimeFound, false);
+    assert.equal(diagnostic.lastCheck.summary.seatFound, false);
+    assert.ok(!diagnosticString.includes(secret));
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
