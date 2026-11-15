@@ -1,0 +1,21 @@
+name: Node.js checks
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript syntax
+        run: |
+          node --check server.mjs
+          node --check public/app.js
+      - name: Test backend
+        run: node --test tests/server.test.mjs
