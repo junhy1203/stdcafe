@@ -183,15 +183,27 @@ async function requestJson(url,options={}){
 
 const diagNames = {profile:'내 정보',seats:'좌석 현황',tickets:'이용권',history:'이용 내역'};
 function setDiagFeedback(message){setText('diagnostics-feedback',message);}
-function showDiagnosticResult(data){
+function showDiagnosticResult(data, sessionResponse){
   setText('diagnostics-version',data.version||'확인 불가');
   setText('diagnostics-auth',data.authenticated?'로그인됨':'로그인 안 됨');
   const last=data.lastCheck;
   setText('diagnostics-loaded',last?.summary ? String(last.summary.pagesLoaded)+'/4개' : '조회 기록 없음');
   setText('diagnostics-time',last?.checkedAt?safeDate(last.checkedAt):'—');
   const parent=$('diagnostics-pages');parent.replaceChildren();
+  const cookieInfo = sessionResponse?.session || data.session;
+  const cookieStatus = document.createElement('div');cookieStatus.className='diagnostics-page-item';
+  const cookieTitle=document.createElement('strong');cookieTitle.textContent='브라우저 세션 쿠키';
+  const cookieText=document.createElement('span');
+  cookieText.textContent = !cookieInfo ? '세션 정보 없음'
+    : !cookieInfo.cookieSent ? '이전 쿠키가 전달되지 않음 (처음 접속 또는 쿠키 차단/삭제 가능)'
+    : cookieInfo.cookieRecognized ? '서버가 현재 쿠키를 인식함' : '이전 쿠키가 현재 서버에서 유효하지 않음 (서버 재시작·만료 가능)';
+  cookieStatus.append(cookieTitle,cookieText);parent.appendChild(cookieStatus);
+  const boot=document.createElement('div');boot.className='diagnostics-page-item';
+  const bootTitle=document.createElement('strong');bootTitle.textContent='웹서버 시작';
+  const bootText=document.createElement('span');bootText.textContent=cookieInfo?.serverStartedAt?safeDate(cookieInfo.serverStartedAt):'확인할 수 없음';
+  boot.append(bootTitle,bootText);parent.appendChild(boot);
   if(!data.authenticated){
-    setDiagFeedback('현재 페이지에 로그인 세션이 없습니다. 설정에서 로그인한 뒤 다시 진단해 주세요.');
+    setDiagFeedback('로그인 세션이 현재 서버에 없습니다. 위 쿠키 상태를 확인하고 같은 Safari 탭에서 다시 로그인해 주세요.');
   }else if(!last){
     setDiagFeedback('로그인 상태는 확인됐지만 회원정보 조회 기록이 없습니다. 회원 데이터 다시 조회를 눌러 보세요.');
   }else{
@@ -219,7 +231,7 @@ async function refreshDiagnostics(){
     csrfToken=session.csrf;
     liveAuthenticated=!!session.authenticated;
     const diagnostic=await requestJson('/api/diagnostics');
-    showDiagnosticResult(diagnostic);
+    showDiagnosticResult(diagnostic,session);
   }catch(err){
     setDiagFeedback('진단 요청 실패: '+err.message);
     setText('diagnostics-auth','확인 실패');
@@ -261,7 +273,15 @@ async function syncBridge(){
       state.data=normalize(liveBlank());state.origin='live';render();
       lookupSummary('로그인 상태 확인됨 · 실제 좌석·잔여시간 조회 중');
       await fetchLive();
-    } else lookupSummary('로그인하지 않았습니다. 실제 값은 아직 없습니다.');
+    } else {
+      const c=status.session;
+      const msg=c?.cookieSent && !c?.cookieRecognized
+        ? '이전 로그인 쿠키가 이 서버에서 유효하지 않습니다. 서버 업데이트·재시작 후에는 다시 로그인해야 합니다.'
+        : c && !c.cookieSent
+          ? '현재 브라우저의 로그인 쿠키가 전달되지 않았습니다. 최초 접속이 아니라면 사파리 쿠키 설정을 확인해 주세요.'
+          : '로그인하지 않았습니다. 실제 값은 아직 없습니다.';
+      lookupSummary(msg);
+    }
   }catch{
     bridgeStatus('개인용 서버 브리지 없음 — 이 사이트의 Node.js 서버가 실행 중인지 확인하세요.');
     $('bridge-login').disabled=true;
@@ -320,7 +340,21 @@ $('bridge-login-form').addEventListener('submit',async(e)=>{
   const device=$('login-device').value.trim();
   $('login-password').value='';
   try{
-    await requestJson('/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({username,password:pw,...(device?{deviceId:device}:{})})});
+    const loginResult=await requestJson('/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify({username,password:pw,...(device?{deviceId:device}:{})})});
+    if(!loginResult.authenticated)throw Error('인증 응답이 로그인 성공을 확인하지 않았습니다.');
+    const verified=await requestJson('/api/session');
+    csrfToken=verified.csrf;
+    if(!verified.authenticated){
+      liveAuthenticated=false;
+      state.data=normalize(liveBlank());state.origin='error';render();
+      const detail=verified.session?.cookieSent && !verified.session?.cookieRecognized
+        ? '세션 쿠키가 서버에서 인식되지 않습니다.'
+        : verified.session && !verified.session.cookieSent
+          ? '사파리가 세션 쿠키를 보내지 않았습니다.'
+          : '서버가 로그인 세션을 유지하지 못했습니다.';
+      lookupSummary('계정 인증은 성공했지만 '+detail+' 진단 모드에서 쿠키 상태를 확인해 주세요.');
+      throw Error('계정 인증 성공 후 세션 유지 실패: '+detail);
+    }
     liveAuthenticated=true;
     lookupSummary('로그인 성공 · 쌤카페 회원 페이지 연결을 확인하는 중…');
     $('bridge-logout').hidden=false;
