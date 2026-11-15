@@ -148,10 +148,41 @@ $('refresh').addEventListener('click',()=>{if(state.origin==='live' && liveAuthe
 // Self-hosted authenticated read-only server integration.
 const sourceNames = {profile:'내 정보',seats:'좌석 현황',tickets:'이용권 정보',history:'이용 내역'};
 const liveBlank = () => ({store:{name:'매장 정보 미확인',address:'서버 데이터에서 매장명을 확인하지 못했습니다.'},member:{seat:null,seatDetail:'',ticket:{name:'이용권 정보',remainingMinutes:null,totalMinutes:null}},seats:[],updatedAt:null});
+// Older Safari HTML can remain cached after the server updates app.js.
+// Rebuild the display container when an old HTML shell lacks the new section.
+function ensureStructuredPanel(){
+  let panel=$('structured-home-panel');
+  if(panel && $('structured-stores') && $('structured-tickets'))return panel;
+  const home=$('view-home');
+  if(!home)return null;
+  if(panel)panel.remove();
+  panel=document.createElement('section');
+  panel.id='structured-home-panel';
+  panel.className='panel live-panel';
+  panel.hidden=true;
+  const title=document.createElement('div');
+  title.className='panel-title';
+  const intro=document.createElement('div');
+  const heading=document.createElement('h2');heading.textContent='앱 홈에서 조회한 매장·이용권';
+  const caption=document.createElement('p');caption.textContent='현재 매장과 최근 이용 매장을 구분해 표시합니다.';
+  intro.append(heading,caption);title.append(intro);panel.append(title);
+  const cols=document.createElement('div');cols.className='structured-columns';
+  for(const [id,label] of [['structured-stores','현재·최근 이용 매장'],['structured-tickets','확인된 이용권']]){
+    const group=document.createElement('div'),h=document.createElement('h3'),list=document.createElement('div');
+    h.textContent=label;list.id=id;list.className='structured-items';
+    group.append(h,list);cols.append(group);
+  }
+  panel.append(cols);
+  const before=$('live-panel');
+  if(before && before.parentNode===home)home.insertBefore(panel,before);
+  else home.append(panel);
+  return panel;
+}
 function clearLiveSources(){
-  $('structured-home-panel').hidden=true;
-  $('structured-stores').replaceChildren();
-  $('structured-tickets').replaceChildren();
+  const panel=ensureStructuredPanel();
+  if(panel)panel.hidden=true;
+  $('structured-stores')?.replaceChildren();
+  $('structured-tickets')?.replaceChildren();
   for(const id of ['live-panel','live-seat-panel','live-ticket-panel'])$(id).hidden=true;
   for(const id of ['live-sources','live-seat-source','live-ticket-source'])$(id).replaceChildren();
 }
@@ -170,6 +201,8 @@ function structuredRow(parent,title,detail){
   item.append(strong,info);parent.appendChild(item);
 }
 function renderStructured(live){
+  const panel=ensureStructuredPanel();
+  if(!panel)return false;
   const current=live?.currentShop||{};
   const recent=Array.isArray(live?.recentShops)?live.recentShops:[];
   const passes=Array.isArray(live?.ticketItems)?live.ticketItems:[];
@@ -197,7 +230,8 @@ function renderStructured(live){
   }
   if(!storesEl.children.length)structuredRow(storesEl,'매장 정보 없음','앱 홈 API에서 매장명이나 최근 이용 매장이 확인되지 않았습니다.');
   if(!passesEl.children.length)structuredRow(passesEl,'이용권 정보 없음','앱 이용권 API에서 항목이 확인되지 않았습니다.');
-  $('structured-home-panel').hidden=false;
+  panel.hidden=false;
+  return true;
 }
 
 function showLiveSources(sources){
