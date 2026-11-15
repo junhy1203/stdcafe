@@ -214,3 +214,35 @@ test('login trace distinguishes upstream rejection, additional auth, malformed r
     }
   }
 });
+
+test('login envelope code locations and missing codes', async () => {
+  const scenarios=[
+    {name:'outer rspcode', expected:200, stage:'authenticated', location:'outer', shape:{rspcode:'0000', result:{s_value:'Y',a_value:'TOKEN_OUTER',name:'회원'}}},
+    {name:'inner rspcode', expected:200, stage:'authenticated', location:'result', shape:{result:{rspcode:'0000',s_value:'Y',a_value:'TOKEN_INNER'}}},
+    {name:'missing rspcode despite token', expected:401, stage:'success_code_missing', location:'missing', shape:{result:{rescode:'0000',s_value:'Y',a_value:'TOKEN_UNCONFIRMED'}}},
+    {name:'non-success rspcode despite token', expected:401, stage:'upstream_rejected', location:'result', shape:{result:{rspcode:'1002',s_value:'Y',a_value:'TOKEN_DENIED'}}},
+    {name:'conflicting codes', expected:502, stage:'upstream_response_unrecognized', location:null, shape:{rspcode:'0000',result:{rspcode:'1002',s_value:'Y',a_value:'TOKEN_CONFLICT'}}},
+  ];
+  for(const scenario of scenarios){
+    const server=createApp({fetchImpl:async()=>mkResponse(JSON.stringify(scenario.shape),'application/json')});
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    const base='http://127.0.0.1:'+server.address().port;
+    try{
+      const init=await fetch(base+'/api/session');
+      const csrf=(await init.json()).csrf;
+      const Cookie=init.headers.get('set-cookie').split(';')[0];
+      const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'tester',password:'fake-password'})});
+      assert.equal(login.status,scenario.expected,scenario.name);
+      const diagResponse=await fetch(base+'/api/diagnostics',{headers:{Cookie}});
+      const text=await diagResponse.text();
+      const diag=JSON.parse(text);
+      assert.equal(diag.authenticated,scenario.expected===200,scenario.name);
+      assert.equal(diag.lastLogin.stage,scenario.stage,scenario.name);
+      assert.equal(diag.lastLogin.codeLocation,scenario.location,scenario.name);
+      assert.equal(diag.lastLogin.tokenProvided,scenario.stage!=='upstream_response_unrecognized',scenario.name);
+      assert.equal(text.includes('TOKEN_'),false,'diagnostics leaked token');
+      assert.equal(text.includes('fake-password'),false,'diagnostics leaked password');
+      if(scenario.name==='missing rspcode despite token')assert.equal(diag.lastLogin.rescode,'0000');
+    }finally{await new Promise(resolve=>server.close(resolve))}
+  }
+});
