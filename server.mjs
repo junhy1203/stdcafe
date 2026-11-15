@@ -189,9 +189,9 @@ function extractStructuredData(home, goods, fallback) {
   const chosenTicket=currentTicket||tickets[0];
   const chosenRecent=currentRecent||recentStores[0];
   const inferredMinutes=validMinutes(h.home_shop_user_remain_m)
-    ?? validMinutes(currentRecent?.remainingRaw)
-    ?? (currentName || currentNumber ? null : validMinutes(chosenRecent?.remainingRaw));
-  const confirmedStoreName=currentName||chosenTicket?.shopName||chosenRecent?.name||'';
+    ?? validMinutes(currentRecent?.remainingRaw);
+  // Do not report a merely recent/historical store as the currently linked cafe.
+  const confirmedStoreName=currentName||(currentNumber?(currentTicket?.shopName||currentRecent?.name||''):'');
   const result=asStatus(fallback,'');
   result.store={
     name:confirmedStoreName||'매장 정보 미확인',
