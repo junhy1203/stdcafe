@@ -513,7 +513,7 @@ export function inspectNativeRoomLayout(html){
   }
   const coords=[],classes={};let seatElements=0,seatElementsWithGeometry=0;
   const geometry=(src,key)=>{
-    const m=new RegExp('(?:^|;)\\s*'+key+'\\s*:\\s*(-?\\d{1,5}(?:\\.\\d{1,3})?)\\s*(px|%)\\b','i').exec(src);
+    const m=new RegExp('(?:^|;)\\s*'+key+'\\s*:\\s*(-?\\d{1,5}(?:\\.\\d{1,3})?)\\s*(px|%)(?=\\s*(?:;|$))','i').exec(src);
     return m?{value:Number(m[1]),unit:m[2]}:null;
   };
   for(const tag of html.matchAll(/<(?:div|span|button|a|li|td|section)\b[^>]{0,1200}>/gi)){
