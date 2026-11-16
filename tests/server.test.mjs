@@ -644,7 +644,7 @@ test('installer includes the separate authenticated seat-map module and UI contr
   assert.ok(server.includes("from './seat-map.mjs'"),'server imports seat-map module');
   assert.ok(html.includes('id="seat-layout-refresh"'));
   assert.ok(html.includes('id="seat-layout-status"'));
-  assert.ok(js.includes("requestJson('/api/seat-layout?floor='+encodeURIComponent(selectedSeatZone))"));
+  assert.ok(js.includes("requestJson('/api/seat-layout?floor='+encodeURIComponent(requestZone))"));
   assert.ok(js.includes("parent.classList.add('physical-floor-plan')"));
 });
 
