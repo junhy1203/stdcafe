@@ -718,3 +718,10 @@ test('personal-seat WebView same-origin redirect is followed without leaking cre
     assert.deepEqual(routes,['/api/app.do','/api/app.do','/mobile/purchase/personal.do','/mobile/purchase/personalChart.do']);
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+
+test('DOM ID variants for seat numbers remain scoped to actual seat-prefixed elements',async()=>{
+  const {parseSeatLayout}=await import('../seat-map.mjs');
+  const parsed=parseSeatLayout('<div id="seat-A01" class="seat available"></div><div id="chair_B02" class="seat occupied"></div><div id="topmenu" class="available"></div>');
+  assert.deepEqual(parsed.seats.map(x=>[x.id,x.status]),[['A01','available'],['B02','occupied']]);
+});
