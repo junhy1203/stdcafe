@@ -198,8 +198,8 @@ function extractStructuredData(home, goods, fallback) {
   // explicitly named a time pass, interpret it as minutes (provisional until
   // compared with the official app's displayed remaining time).
   const timePass=/(?:\d+\s*시간|시간권|time\s*pass)/i.test(chosenTicket?.goodsName||'');
-  const inferredMinutes=(timePass?validMinutes(chosenTicket?.remainingPeriod):null)
-    ?? validMinutes(currentRecent?.remainingRaw);
+  const inferredMinutes=validMinutes(currentRecent?.remainingRaw)
+    ?? (timePass?validMinutes(chosenTicket?.remainingPeriod):null);
   // Do not report a merely recent/historical store as the currently linked cafe.
   const confirmedStoreName=currentName||(currentNumber?(currentTicket?.shopName||currentRecent?.name||''):'');
   const result=asStatus(fallback,'');
