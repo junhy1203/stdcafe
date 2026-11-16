@@ -8,11 +8,12 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import {parseSeatLayout} from './seat-map.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-seats-qr-v9';
+const APP_VERSION = '2026-11-16-seat-layout-v10';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -278,7 +279,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
     for (const [id, sess] of sessions) if (t - sess.last >= TTL_MS) sessions.delete(id);
     if (sessions.size >= 100) throw createError(503, '동시 사용자가 너무 많습니다.');
     const key = rand();
-    s = { sid: key, csrf: rand(24), device: randomBytes(8).toString('hex'), last: t, token: '', name: '', jar: new Map(), lastDiagnostic: null, lastLogin: null };
+    s = { sid: key, csrf: rand(24), device: randomBytes(8).toString('hex'), last: t, token: '', name: '', jar: new Map(), lastDiagnostic: null, lastLogin: null, lastSeatDiagnostic: null };
     sessions.set(key, s);
     const secure = req.socket.encrypted ? '; Secure' : '';
     res.setHeader('Set-Cookie', `${COOKIE}=${key}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TTL_MS/1000}${secure}`);
@@ -310,7 +311,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
         const cookieRecognized = Boolean(presentedCookie && presentedCookie === s.sid);
         const sessionInfo = { cookieSent: Boolean(presentedCookie), cookieRecognized, serverStartedAt: startedAt };
         if (pathname === '/api/session' && req.method === 'GET') return response(res, 200, { authenticated: !!s.token, name: s.token ? s.name : '', csrf: s.csrf, mode: 'WireGuard private, read-only', upstreamVerified: false, version: APP_VERSION, session: sessionInfo, lastLogin: s.lastLogin });
-        if (pathname === '/api/diagnostics' && req.method === 'GET') return response(res, 200, { version: APP_VERSION, authenticated: !!s.token, lastCheck: s.lastDiagnostic, session: sessionInfo, lastLogin: s.lastLogin });
+        if (pathname === '/api/diagnostics' && req.method === 'GET') return response(res, 200, { version: APP_VERSION, authenticated: !!s.token, lastCheck: s.lastDiagnostic, session: sessionInfo, lastLogin: s.lastLogin, seatPage: s.lastSeatDiagnostic });
         if (pathname === '/api/login' && req.method === 'POST') {
           checkMutation(req, s);
           const loginTrace = { checkedAt: new Date(now()).toISOString(), stage: 'started', upstreamCode: null, codeLocation: null, resultType: null, rescode: null, resultKeys: [], outerKeys: [], secondFactorAccepted: null, tokenProvided: null };
@@ -321,7 +322,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           recent.push(now()); attempts.set(key, recent);
           const v = await bodyJson(req);
           if (typeof v.username !== 'string' || !v.username.trim() || v.username.length > 120 || typeof v.password !== 'string' || !v.password || v.password.length > 250 || (v.deviceId !== undefined && (typeof v.deviceId !== 'string' || v.deviceId.length < 8 || v.deviceId.length > 128))) throw createError(400, '로그인 입력값을 확인하세요.');
-          s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null;
+          s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null; s.lastSeatDiagnostic = null;
           if (v.deviceId) s.device = v.deviceId;
           const payload = loginPayload(v.username.trim(), v.password, s.device);
           loginTrace.stage = 'connecting_to_upstream';
@@ -361,11 +362,76 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           return response(res, 200, { authenticated: true, name: s.name });
         }
         if (pathname === '/api/logout' && req.method === 'POST') {
-          checkMutation(req, s); s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null; s.lastLogin = null;
+          checkMutation(req, s); s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null; s.lastLogin = null; s.lastSeatDiagnostic = null;
           return response(res, 200, { ok: true });
         }
         // Read the entry QR only when the signed-in user explicitly opens the QR screen.
         // Never include QR payloads in status, diagnostics, URLs, logs, or persistent storage.
+        // The native APK opens enterSeatView.do using tk,m_value,SHOP_NO,FLOOR_NO.
+        // All upstream credentials stay on this VPN-only server. HTML and scripts
+        // are parsed as DATA and are never executed or sent to the user's browser.
+        if (pathname === '/api/seat-layout' && req.method === 'GET') {
+          if (!s.token) throw createError(401,'좌석별 현황을 보려면 로그인해 주세요.');
+          let home;
+          try{
+            const remote=await upstream(UPSTREAM+'/api/app.do',{
+              method:'POST',
+              headers:{'Content-Type':'application/json',Accept:'application/json'},
+              body:JSON.stringify({cmd:'1100',m_value:s.device,tk:s.token,latitude:'0',longitude:'0'})
+            },s.jar);
+            home=upstreamPayload(remote.text);
+          }catch{
+            return response(res,200,{ok:false,source:'app-home',seats:[],reason:'앱 홈에서 매장·층 정보를 확인하지 못했습니다.'});
+          }
+          if(String(home.rspcode??'')!=='0000')
+            return response(res,200,{ok:false,source:'app-home',seats:[],reason:'앱 홈에서 현재 매장 정보를 조회할 수 없습니다.'});
+          const shopNo=readable(home.home_shop_no,40);
+          const floorNo=readable(home.home_floor_no,40);
+          if(!/^[0-9A-Za-z_-]{1,40}$/.test(shopNo)||!/^[0-9A-Za-z_-]{1,40}$/.test(floorNo))
+            return response(res,200,{ok:false,source:'app-home',seats:[],reason:'현재 매장번호 또는 층번호가 누락되어 실제 좌석 화면을 특정할 수 없습니다.'});
+          const attempts=[];
+          for(const [name,pathnameUp] of [
+            ['enter','/mobile/enterSeatView.do'],
+            ['change','/mobile/seatChangeView.do']
+          ]){
+            const url=new URL(pathnameUp,UPSTREAM);
+            url.searchParams.set('tk',s.token);
+            url.searchParams.set('m_value',s.device);
+            url.searchParams.set('SHOP_NO',shopNo);
+            url.searchParams.set('FLOOR_NO',floorNo);
+            try{
+              const remote=await upstream(url,{method:'GET',headers:{Accept:'text/html,application/xhtml+xml'}},s.jar);
+              const mime=remote.resp.headers.get('content-type')||'';
+              if(!/html/i.test(mime)){attempts.push({name,error:'HTML 형식이 아닌 응답'});continue;}
+              const parsed=parseSeatLayout(remote.text,name);
+              attempts.push({name,summary:parsed.summary,inspect:parsed.inspect});
+              if(parsed.seats.length){
+                s.lastSeatDiagnostic={
+                  checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
+                  floorNo,source:name,summary:parsed.summary,
+                  detectedScripts:parsed.inspect.scriptPaths
+                };
+                return response(res,200,{
+                  ok:true,shopName:readable(home.home_shop_name),floorNo,
+                  ...parsed,
+                  note:parsed.actualPositions?'실제 페이지에 포함된 좌표로 표시':'좌석번호·상태 목록을 시각화한 것으로 실제 공간 배치는 아닙니다.'
+                });
+              }
+            }catch(e){
+              attempts.push({name,error:e.status?'공식 웹페이지 조회 오류':'HTML 구조 또는 응답을 분석할 수 없음'});
+            }
+          }
+          s.lastSeatDiagnostic={
+            checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
+            floorNo,source:null,detectedScripts:[...new Set(attempts.flatMap(a=>a.inspect?.scriptPaths||[]))].slice(0,20),
+            attempts:attempts.map(a=>({name:a.name,error:a.error||'',summary:a.summary||null,hints:a.inspect?.hints||null}))
+          };
+          return response(res,200,{
+            ok:false,shopName:readable(home.home_shop_name),floorNo,seats:[],
+            reason:'공식 좌석 화면에는 직접 판독할 수 있는 좌석번호별 상태가 없습니다. JavaScript의 별도 조회 API가 필요한 것으로 보입니다.',
+            inspect:{attempts:s.lastSeatDiagnostic.attempts,detectedScripts:s.lastSeatDiagnostic.detectedScripts}
+          });
+        }
         if (pathname === '/api/entry-qr' && req.method === 'GET') {
           if (!s.token) throw createError(401,'로그인 후 입장 QR을 확인할 수 있습니다.');
           const remote=await upstream(UPSTREAM+'/api/app.do',{
