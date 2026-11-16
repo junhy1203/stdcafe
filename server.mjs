@@ -198,8 +198,9 @@ function extractStructuredData(home, goods, fallback) {
   // explicitly named a time pass, interpret it as minutes (provisional until
   // compared with the official app's displayed remaining time).
   const timePass=/(?:\d+\s*시간|시간권|time\s*pass)/i.test(chosenTicket?.goodsName||'');
-  const inferredMinutes=validMinutes(currentRecent?.remainingRaw)
-    ?? (timePass?validMinutes(chosenTicket?.remainingPeriod):null);
+  const recentRemaining=validMinutes(currentRecent?.remainingRaw);
+  const passRemaining=timePass?validMinutes(chosenTicket?.remainingPeriod):null;
+  const inferredMinutes=recentRemaining??passRemaining;
   // Do not report a merely recent/historical store as the currently linked cafe.
   const confirmedStoreName=currentName||(currentNumber?(currentTicket?.shopName||currentRecent?.name||''):'');
   const result=asStatus(fallback,'');
@@ -213,7 +214,7 @@ function extractStructuredData(home, goods, fallback) {
     totalMinutes:null
   };
   result.live.currentShop={name:currentName,shopNo:currentNumber,floorNo:readable(h.home_floor_no,30)};
-  result.live.remainingTimeInterpretation=timePass&&validMinutes(chosenTicket?.remainingPeriod)!==null?'REMAIN_PERIOD를 분 단위로 잠정 해석':'미확인';
+  result.live.remainingTimeInterpretation=recentRemaining!==null?'최근 매장 REMAINTIME':passRemaining!==null?'이용권 REMAIN_PERIOD를 분 단위로 잠정 해석':'미확인';
   // These counters power the native app's occupied/total labels.
   // Individual seats are intentionally not fabricated from aggregate counts.
   result.live.seatAvailability={
