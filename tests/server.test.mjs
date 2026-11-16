@@ -420,3 +420,24 @@ test('entry, availability and QR elements exist in browser shell',async()=>{
   }
   assert.ok(html.includes('/seats-qr-v9')||html.includes('seats-qr-v9'),'cache-version not updated');
 });
+
+test('QR ES module is deployed and served with the right MIME type',async()=>{
+  const fs=await import('node:fs/promises');
+  const installer=await fs.readFile(new URL('../deploy/install.sh',import.meta.url),'utf8');
+  assert.match(installer,/install -d -m 0755[^\n]*"\$DEST\/public\/vendor"/,'installer must create vendor directory');
+  assert.match(installer,/install -m 0644[^\n]*"\$DIR\/public\/vendor\/qrcode\.mjs"[^\n]*"\$DEST\/public\/vendor\/qrcode\.mjs"/,'installer must copy the QR module');
+  assert.match(installer,/curl[^\n]*\/vendor\/qrcode\.mjs/,'installer must verify QR module is served');
+  const server=createApp({ fetchImpl:async()=>{throw Error('no upstream request allowed')} });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const res=await fetch(base+'/vendor/qrcode.mjs');
+    assert.equal(res.status,200,'QR import path must be routable');
+    assert.match(res.headers.get('content-type'),/text\/javascript/,'Safari needs module JavaScript MIME type');
+    const body=await res.text();
+    assert.match(body,/export default qrcode/);
+    const head=await fetch(base+'/vendor/qrcode.mjs',{method:'HEAD'});
+    assert.equal(head.status,200,'installer uses a HEAD check');
+    assert.match(head.headers.get('content-type'),/text\/javascript/);
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
