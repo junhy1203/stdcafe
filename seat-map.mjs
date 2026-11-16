@@ -78,6 +78,10 @@ function seatFromElement(a){
     const m=/^(?:seat|chair)[-_]?([A-Za-z0-9_-]{1,25})$/i.exec(a.id);
     if(m)id=m[1];
   }
+  if(!id&&typeof a.class==='string'){
+    const marked=a.class.split(/\s+/).find(c=>/^seatNo_([A-Za-z]{0,3}\d{1,4}[A-Za-z]?)$/i.test(c));
+    if(marked)id=marked.slice('seatNo_'.length);
+  }
   if(!id)return null;
   const obj={SEAT_NO:id};
   for(const key of ATTR_STATUS_KEYS){
@@ -434,6 +438,39 @@ function collectObjects(input,out,depth=0,seatContext=false){
     }
   }
 }
+
+/**
+ * Native SSAMCAFE pages include many short inline scripts referring to
+ * seatNo_19 etc. These are real seat identifiers, but NOT sufficient proof
+ * of vacancy, occupancy, or physical coordinates. Never infer status or
+ * total floor capacity from the number of markers.
+ */
+export function extractNativeSeatMarkers(html){
+  if(typeof html!=='string'||html.length>MAX_HTML)return {seats:[],evidence:0};
+  const found=new Map();
+  const scripts=[...html.matchAll(/<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]{0,150000}?)<\/script>/gi)];
+  for(const m of scripts){
+    const code=m[1];
+    const ids=[...code.matchAll(/\bseatNo_([A-Za-z]{0,3}\d{1,4}[A-Za-z]?)\b/gi)]
+      .map(match=>match[1]);
+    if(!ids.length)continue;
+    for(const id of ids){
+      if(!found.has(id))found.set(id,{id,status:'unknown',x:null,y:null});
+    }
+    if(found.size>MAX_SEATS)break;
+  }
+  // Reject isolated identifiers from unrelated helper scripts. Either a
+  // proper seat view or multiple distinct numbered markers must be present.
+  const actualView=/\b(?:fn_seatList|fn_seat|seatState|SEAT_NO|wrap-seat|info-seat)\b/i.test(html);
+  const verifiedAsSeatIds=found.size>=3||actualView&&found.size>=1;
+  if(!verifiedAsSeatIds)return {seats:[],evidence:found.size};
+  return {
+    seats:[...found.values()].slice(0,MAX_SEATS),
+    evidence:found.size,
+    description:'Native inline scripts contain numbered seatNo_ identifiers; their states and positions are not verified'
+  };
+}
+
 function extractHtmlSeatRecords(html){
   const out=[];
   for(const m of html.matchAll(/<(?:div|button|li|span|td|a|rect|g)\b[^>]{0,1200}>/gi)){
@@ -480,7 +517,11 @@ function scriptPaths(html){
 }
 export function parseSeatLayout(html,source='enter'){
   if(typeof html!=='string'||html.length>MAX_HTML)throw new Error('좌석 페이지 크기를 확인할 수 없습니다.');
-  const rows=extractHtmlSeatRecords(html),byId=new Map(),ambiguous=new Set();
+  const native=extractNativeSeatMarkers(html);
+  const rows=extractHtmlSeatRecords(html);
+  const known=new Set(rows.map(row=>row.id));
+  for(const item of native.seats)if(!known.has(item.id))rows.push(item);
+  const byId=new Map(),ambiguous=new Set();
   let conflict=0;
   for(const seat of rows){
     if(ambiguous.has(seat.id))continue;
@@ -494,9 +535,13 @@ export function parseSeatLayout(html,source='enter'){
   const [available,occupied,unknown]=['available','occupied','unknown'].map(status=>seats.filter(s=>s.status===status).length);
   return {
     source,seats,actualPositions,
-    summary:{count:seats.length,available,occupied,unknown,coordinates:placed,conflicts:conflict},
+    partialSeatList:unknown>0&&available+occupied===0,
+    summary:{count:seats.length,available,occupied,unknown,coordinates:placed,conflicts:conflict,
+      nativeMarkerCount:native.evidence,completeFloorLayout:false},
     inspect:{
       htmlCharacters:html.length,
+      nativeMarkers:{count:native.evidence,shown:native.seats.length,
+        statusUnverified:true,ids:native.seats.map(s=>s.id).slice(0,100)},
       scriptPaths:scriptPaths(html),
       candidateApiPaths:findSeatApiPaths(html),
       requestHints:inspectSeatRequests(html),
