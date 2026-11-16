@@ -418,7 +418,7 @@ test('entry, availability and QR elements exist in browser shell',async()=>{
     assert.ok(html.includes('id="'+id+'"'),'Missing HTML element '+id);
     assert.ok(js.includes("'"+id+"'"),'Missing JS reference '+id);
   }
-  assert.ok(html.includes('app.js?v=20261116-seat-diagnostic-v12'),'cache-version not updated');
+  assert.ok(html.includes('app.js?v=20261116-ajax-inspect-v13'),'cache-version not updated');
 });
 
 test('QR ES module is deployed and served with the right MIME type',async()=>{
@@ -762,4 +762,63 @@ test('seat diagnostics copy widget exists, sanitizes and supports HTTP Safari fa
   assert.equal(body.includes('SENSITIVE'),false);
   assert.equal(body.includes('PRIVATE_SHOP'),false);
   assert.equal(body.includes('PERSON'),false);
+});
+
+test('inline personal-seat AJAX reveals POST/GET verbs and field names without raw values',async()=>{
+  const {parseSeatLayout,inspectSeatRequests}=await import('../seat-map.mjs');
+  const page='<html><form action="/mobile/purchase/seatType.do" method="post"><input name="SHOP_NO" value="private-shop-secret"><input name="FLOOR_NO" value="1"></form><script>$.ajax({url:"/mobile/purchase/chart.do",type:"POST",data:{SHOP_NO: $("#s").val(), FLOOR_NO:$("#f").val()}, success:function(data){}});</script></html>';
+  const hints=inspectSeatRequests(page);
+  assert.ok(hints.some(v=>v.path==='/mobile/purchase/chart.do'&&v.method==='POST'));
+  assert.ok(hints.some(v=>v.path==='/mobile/purchase/seatType.do'&&v.method==='POST'));
+  const parsed=parseSeatLayout(page,'personal');
+  const json=JSON.stringify(parsed.inspect);
+  assert.ok(json.includes('SHOP_NO'));
+  assert.ok(json.includes('FLOOR_NO'));
+  assert.ok(!json.includes('private-shop-secret'));
+});
+
+test('explicit POST chart request is mirrored as a read-only seat fetch',async()=>{
+  const routes=[];
+  const mock=async(url,options)=>{
+    const u=new URL(url);
+    routes.push({path:u.pathname,method:options.method||'GET',body:options.body||''});
+    if(u.pathname==='/api/app.do'){
+      const cmd=JSON.parse(options.body).cmd;
+      if(cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'PRIVATE_AUTH'}}),'application/json');
+      return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'SHOP7',home_floor_no:'1',home_shop_name:'유효한 매장'}}),'application/json');
+    }
+    if(u.pathname==='/mobile/purchase/personal.do'){
+      return mkResponse('<html><script>$.ajax({url:"/mobile/purchase/chart.do",type:"POST",data:{SHOP_NO: $("#s").val(),FLOOR_NO:$("#f").val()},success:function(data){}});</script></html>','text/html');
+    }
+    if(u.pathname==='/mobile/enterSeatView.do'||u.pathname==='/mobile/seatChangeView.do')return mkResponse('<html>좌석 정보 준비 중</html>','text/html');
+    if(u.pathname==='/mobile/purchase/chart.do'){
+      assert.equal(options.method,'POST');
+      const body=new URLSearchParams(options.body);
+      assert.equal(body.get('SHOP_NO'),'SHOP7');
+      assert.equal(body.get('FLOOR_NO'),'1');
+      return mkResponse(JSON.stringify({result:{seatList:[{SEAT_NO:'A01',USE_YN:'N',SEAT_X:10,SEAT_Y:20},{SEAT_NO:'A02',USE_YN:'Y',SEAT_X:25,SEAT_Y:20}]}}),'application/json');
+    }
+    throw Error('Unrecognized request '+u.pathname);
+  };
+  const server=createApp({fetchImpl:mock});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const init=await fetch(base+'/api/session'),csrf=(await init.json()).csrf,Cookie=init.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'demo',password:'not-real'})});
+    assert.equal(login.status,200);
+    const result=await fetch(base+'/api/seat-layout',{headers:{Cookie}});
+    assert.equal(result.status,200);
+    const raw=await result.text(),data=JSON.parse(raw);
+    assert.equal(data.ok,true);
+    assert.equal(data.summary.available,1);
+    assert.equal(data.summary.occupied,1);
+    assert.equal(data.source,'app-seat-api');
+    assert.ok(routes.some(r=>r.path==='/mobile/purchase/chart.do'&&r.method==='POST'));
+    assert.ok(!raw.includes('PRIVATE_AUTH'));
+    const diag=await fetch(base+'/api/diagnostics',{headers:{Cookie}});
+    const diagRaw=await diag.text();
+    assert.ok(diagRaw.includes('POST'));
+    assert.ok(!diagRaw.includes('PRIVATE_AUTH'));
+  }finally{await new Promise(resolve=>server.close(resolve))}
 });
