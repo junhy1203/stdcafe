@@ -644,3 +644,42 @@ test('installer includes the separate authenticated seat-map module and UI contr
   assert.ok(js.includes("requestJson('/api/seat-layout')"));
   assert.ok(js.includes("parent.classList.add('physical-floor-plan')"));
 });
+
+
+test('APK personal seat page is the primary individual-seat source',async()=>{
+  const calls=[];
+  const mock=async (url,options)=>{
+    const u=new URL(url);calls.push({path:u.pathname,params:u.searchParams});
+    if(u.pathname==='/api/app.do'){
+      const req=JSON.parse(options.body);
+      if(req.cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'TESTTOKEN'}}),'application/json');
+      if(req.cmd==='1100')return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'999',home_shop_name:'실제 좌석 화면',home_floor_no:''}}),'application/json');
+    }
+    if(u.pathname==='/mobile/purchase/personal.do'){
+      assert.equal(u.searchParams.get('SHOP_NO'),'999');
+      assert.equal(u.searchParams.get('tk'),'TESTTOKEN');
+      assert.ok(u.searchParams.get('m_value'));
+      assert.equal(u.searchParams.has('FLOOR_NO'),false,'APK getPersonal does not pass floor');
+      return mkResponse('<html><div data-seat-no="S12" data-use-yn="N" data-x="20" data-y="35"></div><div data-seat-no="S13" data-use-yn="Y" data-x="80" data-y="35"></div><div data-seat-no="S14" data-use-yn="N" data-x="40" data-y="70"></div></html>','text/html');
+    }
+    throw Error('unexpected request '+u.pathname);
+  };
+  const server=createApp({fetchImpl:mock});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const session=await fetch(base+'/api/session');
+    const csrf=(await session.json()).csrf,Cookie=session.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'u',password:'p'})});
+    assert.equal(login.status,200);
+    const r=await fetch(base+'/api/seat-layout',{headers:{Cookie}});
+    assert.equal(r.status,200);
+    const result=await r.json();
+    assert.equal(result.ok,true);assert.equal(result.source,'personal');
+    assert.equal(result.seats.length,3);
+    assert.equal(result.summary.available,2);
+    assert.equal(result.summary.occupied,1);
+    assert.equal(result.actualPositions,true);
+    assert.deepEqual(calls.map(x=>x.path),['/api/app.do','/api/app.do','/mobile/purchase/personal.do']);
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
