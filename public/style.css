@@ -76,3 +76,9 @@
 .seat-grid.full.physical-floor-plan .seat{position:absolute;width:42px;height:33px;aspect-ratio:auto;margin-left:-21px;margin-top:-16px;border-radius:7px;z-index:1;font-size:10px}
 .seat-grid.full.physical-floor-plan .seat:hover,.seat-grid.full.physical-floor-plan .seat:focus-visible{z-index:10}
 @media(max-width:740px){.seat-grid.full.physical-floor-plan{min-width:680px}.seat-map-controls button{width:100%}.seat-map-controls{align-items:stretch}}
+
+/* Copyable redacted diagnostic text for iPad Safari (including non-HTTPS local VPN). */
+.seat-diagnostic-export{display:block;width:100%;min-height:160px;margin-top:16px;padding:12px;border:1px solid #dddbea;background:#f9f8ff;color:#414156;border-radius:10px;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;white-space:pre;resize:vertical}
+.seat-diagnostic-export[hidden]{display:none}
+#seat-diagnostic-copy{cursor:pointer;flex-shrink:0;border:1px solid #dddbea;background:#f5f2ff;color:#5744b6;border-radius:9px;padding:10px 14px;font-size:12px;font-weight:750}
+#seat-diagnostic-copy:disabled{opacity:.5;cursor:wait}
