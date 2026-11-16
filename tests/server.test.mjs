@@ -441,3 +441,97 @@ test('QR ES module is deployed and served with the right MIME type',async()=>{
     assert.match(head.headers.get('content-type'),/text\/javascript/);
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+
+test('native WebView seat layout uses private shop and floor parameters, never exposes auth token', async () => {
+  const {parseSeatLayout}=await import('../seat-map.mjs');
+  const direct=parseSeatLayout('<div data-seat-no="A01" data-status="available" style="left: 25px; top: 40px"></div><div data-seat-no="A02" data-status="occupied" style="left: 80px; top: 40px"></div><div data-seat-no="A03" data-status="C" style="left: 130px; top: 80px"></div>');
+  assert.equal(direct.seats.length,3);
+  assert.equal(direct.summary.available,1);
+  assert.equal(direct.summary.occupied,1);
+  assert.equal(direct.summary.unknown,1);
+  assert.equal(direct.actualPositions,true);
+  const json=parseSeatLayout('<script>window.seatList = [{"SEAT_NO":"B01","USE_YN":"N","SEAT_X":20,"SEAT_Y":60},{"SEAT_NO":"B02","USE_YN":"Y","SEAT_X":70,"SEAT_Y":60}]</script>');
+  assert.deepEqual(json.seats.map(x=>x.status),['available','occupied']);
+  assert.equal(json.summary.count,2);
+  const conflicted=parseSeatLayout('<span data-seat-no="B03" data-status="available"></span><span data-seat-no="B03" data-status="occupied"></span>');
+  assert.equal(conflicted.seats.length,0,'conflicting seat data cannot be trusted');
+  const empty=parseSeatLayout('<div>전체 174석, 사용중 69석, 빈자리 105석</div>');
+  assert.equal(empty.seats.length,0,'aggregated counts must not fabricate seat numbers');
+
+  const secret='PRIVATE_AUTH_MUST_NOT_BE_RETURNED';
+  const calls=[];
+  const mock=async(url,options)=>{
+    const u=new URL(url);
+    calls.push({path:u.pathname,params:u.searchParams,method:options.method||'GET'});
+    if(u.pathname==='/api/app.do'){
+      const body=JSON.parse(options.body);
+      if(body.cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:secret,name:'회원'}}),'application/json');
+      if(body.cmd==='1100')return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'SHOP77',home_shop_name:'테스트 독서실',home_floor_no:'2'}}),'application/json');
+      throw Error('Unexpected command '+body.cmd);
+    }
+    if(u.pathname==='/mobile/enterSeatView.do'){
+      assert.equal(u.searchParams.get('tk'),secret);
+      assert.equal(u.searchParams.get('SHOP_NO'),'SHOP77');
+      assert.equal(u.searchParams.get('FLOOR_NO'),'2');
+      assert.ok(u.searchParams.get('m_value'));
+      return mkResponse('<html><script src="/assets/js/seat-chart.js"></script><div data-seat-no="A01" data-seat-status="available" data-x="12" data-y="20"></div><div data-seat-no="A02" data-seat-status="occupied" data-x="88" data-y="80"></div></html>','text/html');
+    }
+    throw Error('Unexpected URL '+u.pathname);
+  };
+  const server=createApp({fetchImpl:mock});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    assert.equal((await fetch(base+'/api/seat-layout')).status,401);
+    const init=await fetch(base+'/api/session');
+    const csrf=(await init.json()).csrf;
+    const cookie=init.headers.get('set-cookie').split(';')[0];
+    const logged=await fetch(base+'/api/login',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'tester',password:'wrong'})});
+    assert.equal(logged.status,200);
+    const res=await fetch(base+'/api/seat-layout',{headers:{Cookie:cookie}});
+    assert.equal(res.status,200);
+    const raw=await res.text(),data=JSON.parse(raw);
+    assert.equal(data.ok,true);
+    assert.equal(data.shopName,'테스트 독서실');
+    assert.equal(data.floorNo,'2');
+    assert.equal(data.seats.length,2);
+    assert.equal(data.seats[0].status,'available');
+    assert.equal(data.seats[1].status,'occupied');
+    assert.equal(data.inspect.scriptPaths[0],'/assets/js/seat-chart.js');
+    assert.equal(raw.includes(secret),false,'token must never appear in rendered map JSON');
+    const diag=await fetch(base+'/api/diagnostics',{headers:{Cookie:cookie}});
+    const diagRaw=await diag.text();
+    assert.equal(diagRaw.includes(secret),false,'token must not appear in diagnostics');
+    assert.ok(calls.some(c=>c.path==='/mobile/enterSeatView.do'));
+    assert.equal(calls.some(c=>c.path==='/mobile/seatChangeView.do'),false);
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
+
+test('native WebView seat layout falls back without inventing seats when HTML only has summary',async()=>{
+  const mock=async(url,options)=>{
+    const u=new URL(url);
+    if(u.pathname==='/api/app.do'){
+      const p=JSON.parse(options.body);
+      if(p.cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'TESTTOKEN'}}),'application/json');
+      return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'99',home_floor_no:'1',home_shop_name:'테스트 매장'}}),'application/json');
+    }
+    if(u.pathname==='/mobile/enterSeatView.do'||u.pathname==='/mobile/seatChangeView.do'){
+      return mkResponse('<html>빈 좌석 105석<script src="/assets/seatchart.js"></script></html>','text/html');
+    }
+    throw Error('unexpected request');
+  };
+  const server=createApp({fetchImpl:mock});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const init=await fetch(base+'/api/session'),csrf=(await init.json()).csrf,cookie=init.headers.get('set-cookie').split(';')[0];
+    await fetch(base+'/api/login',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'u',password:'p'})});
+    const response=await fetch(base+'/api/seat-layout',{headers:{Cookie:cookie}});
+    const result=await response.json();
+    assert.equal(result.ok,false);
+    assert.equal(result.seats.length,0);
+    assert.ok(result.inspect.detectedScripts.includes('/assets/seatchart.js'));
+    assert.ok(result.reason.includes('별도 조회 API'));
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
