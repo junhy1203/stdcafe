@@ -358,6 +358,7 @@ test('authenticated entry QR and counted available seats from official home fiel
         home_shop_tot_g:'7',home_shop_use_g:'7',
         home_shop_tot_l:'30',home_shop_use_l:'31',
         home_shop_user_remain_m:'0',
+        use_state:'C',
         home_qr_code:entryCode
       }}),'application/json');
       if(payload.cmd==='1101')return mkResponse(JSON.stringify({rspcode:'0000',result:{lsat_goods_use_info:[]}}),'application/json');
@@ -387,6 +388,8 @@ test('authenticated entry QR and counted available seats from official home fiel
     assert.equal(data.live.currentShop.floorNo,'2');
     assert.equal(data.member.ticket.remainingMinutes,null,'home_shop_user_remain_m is monetary, not time');
     assert.equal(data.live.entryQrAvailable,true);
+    assert.equal(data.live.accessState.homeUseStateCode,'C');
+    assert.equal(data.live.accessState.verifiedMeaning,false);
     assert.equal(statusString.includes(entryCode),false,'QR must not be in ordinary status');
     const diag=await fetch(base+'/api/diagnostics',{headers:{Cookie}});
     assert.equal((await diag.text()).includes(entryCode),false,'QR must not be in diagnostics');
