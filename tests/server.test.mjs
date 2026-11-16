@@ -418,7 +418,7 @@ test('entry, availability and QR elements exist in browser shell',async()=>{
     assert.ok(html.includes('id="'+id+'"'),'Missing HTML element '+id);
     assert.ok(js.includes("'"+id+"'"),'Missing JS reference '+id);
   }
-  assert.ok(html.includes('app.js?v=20261116-personal-seat-v11'),'cache-version not updated');
+  assert.ok(html.includes('app.js?v=20261116-seat-diagnostic-v12'),'cache-version not updated');
 });
 
 test('QR ES module is deployed and served with the right MIME type',async()=>{
@@ -724,4 +724,42 @@ test('DOM ID variants for seat numbers remain scoped to actual seat-prefixed ele
   const {parseSeatLayout}=await import('../seat-map.mjs');
   const parsed=parseSeatLayout('<div id="seat-A01" class="seat available"></div><div id="chair_B02" class="seat occupied"></div><div id="topmenu" class="available"></div>');
   assert.deepEqual(parsed.seats.map(x=>[x.id,x.status]),[['A01','available'],['B02','occupied']]);
+});
+
+
+test('seat-layout diagnostics identify login or script-only HTML without exposing source text',async()=>{
+  const {parseSeatLayout}=await import('../seat-map.mjs');
+  const html='<html><form action="/mobile/login.do"><input type="password" value="SENSITIVE_PASSWORD"></form><script src="/js/chart.js"></script><p>로그인 필요</p></html>';
+  const out=parseSeatLayout(html,'personal');
+  assert.equal(out.seats.length,0);
+  assert.equal(out.inspect.structure.likelyLoginPage,true);
+  assert.equal(out.inspect.structure.forms,1);
+  assert.equal(out.inspect.structure.externalScripts,1);
+  assert.equal(out.inspect.scriptPaths[0],'/js/chart.js');
+  assert.equal(JSON.stringify(out.inspect).includes('SENSITIVE_PASSWORD'),false);
+});
+
+test('seat diagnostics copy widget exists, sanitizes and supports HTTP Safari fallback',async()=>{
+  const fs=await import('node:fs/promises');
+  const html=await fs.readFile(new URL('../public/index.html',import.meta.url),'utf8');
+  const app=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
+  const css=await fs.readFile(new URL('../public/style.css',import.meta.url),'utf8');
+  assert.match(html,/id="seat-diagnostic-copy"/);
+  assert.match(html,/id="seat-diagnostic-export"/);
+  assert.match(app,/function safeSeatDiagnostic\(data\)/);
+  assert.match(app,/document\.execCommand\('copy'\)/);
+  assert.match(css,/seat-diagnostic-export\[hidden\]/);
+  const start=app.indexOf('function safeSeatDiagnostic(data){');
+  const end=app.indexOf('\nasync function copySeatDiagnostic()',start);
+  assert.ok(start>=0&&end>start);
+  const safe=new Function(app.slice(start,end)+'\nreturn safeSeatDiagnostic;')();
+  const diag={version:'v12',authenticated:true,csrf:'SENSITIVE_CSRF',
+    lastLogin:{username:'PERSON'},seatPage:{shopName:'PRIVATE_SHOP',floorNo:'2',source:'personal',
+      attempts:[{name:'personal',htmlCharacters:100,error:'',structure:{scripts:3}}],
+      detectedScripts:['/js/chart.js'],detectedReadApis:['/mobile/seatStatusList.do'],accessToken:'SENSITIVE_TOKEN'}};
+  const body=JSON.stringify(safe(diag));
+  assert.ok(body.includes('/mobile/seatStatusList.do'));
+  assert.equal(body.includes('SENSITIVE'),false);
+  assert.equal(body.includes('PRIVATE_SHOP'),false);
+  assert.equal(body.includes('PERSON'),false);
 });
