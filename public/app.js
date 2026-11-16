@@ -564,7 +564,13 @@ async function loadSeatLayout(force=false){
       seatLayoutMeta={actualPositions:false,floorNo:payload.floorNo||''};
       state.data=normalize({...state.data,seats:[]});render();
       const reason=payload.reason||'서버 응답에 개별 좌석 상태가 없습니다.';
-      setText('seat-layout-status',reason+' · 좌석 총계와 구분해 표시합니다.');
+      const tries=payload.inspect?.attempts||[];
+      const personal=tries.find(a=>a.name==='personal');
+      const hint=personal
+        ?' 개인석 화면: '+(personal.error||((personal.htmlCharacters??0)+'자 HTML'))+
+          (personal.structure?.likelyLoginPage?' (로그인 화면 가능성)':'')
+        :'';
+      setText('seat-layout-status',reason+hint+' · 아래 좌석 조회 진단 복사 버튼으로 분석 결과를 복사할 수 있습니다.');
       return false;
     }
     seatLayoutMeta={actualPositions:!!payload.actualPositions,floorNo:payload.floorNo||'',source:payload.source};
@@ -582,6 +588,66 @@ async function loadSeatLayout(force=false){
   }finally{btn.disabled=false;}
 }
 $('seat-layout-refresh').addEventListener('click',()=>loadSeatLayout(true));
+
+function safeSeatDiagnostic(data){
+  const page=data?.seatPage||null;
+  const attempt = a=>({
+    screen:a.name||'',
+    error:a.error||'',
+    redirectedPaths:Array.isArray(a.redirects)?a.redirects.slice(0,5):[],
+    finalPath:a.finalPath||null,
+    htmlCharacters:a.htmlCharacters??null,
+    structure:a.structure||null,
+    hints:a.hints||null,
+    seatsFound:a.summary?.count??0
+  });
+  return {
+    version:data?.version||'',
+    authenticated:!!data?.authenticated,
+    seat:{
+      checkedAt:page?.checkedAt||null,
+      floorNo:page?.floorNo||null,
+      source:page?.source||null,
+      summary:page?.summary||null,
+      attemptedPages:Array.isArray(page?.attempts)?page.attempts.map(attempt):[],
+      loadedJsPaths:Array.isArray(page?.detectedScripts)?page.detectedScripts.slice(0,16):[],
+      seatReadApiCandidates:Array.isArray(page?.detectedReadApis)?page.detectedReadApis.slice(0,16):[],
+      jsAnalysis:Array.isArray(page?.inspected)?page.inspected.map(x=>({
+        path:x.path||'',candidatePaths:x.candidates||[],error:x.error||''
+      })):[],
+      attemptedReadApis:Array.isArray(page?.probes)?page.probes.slice(0,8):[]
+    }
+  };
+}
+async function copySeatDiagnostic(){
+  const button=$('seat-diagnostic-copy'),area=$('seat-diagnostic-export');
+  button.disabled=true;
+  try{
+    const data=await requestJson('/api/diagnostics');
+    if(!data.seatPage){
+      setText('seat-layout-status','좌석 조회 기록이 없습니다. 먼저 개별 좌석 상태 조회를 눌러 주세요.');
+      return;
+    }
+    const report=JSON.stringify(safeSeatDiagnostic(data),null,2);
+    area.value=report;area.hidden=false;
+    let copied=false;
+    if(typeof navigator!=='undefined'&&navigator.clipboard?.writeText){
+      try{await navigator.clipboard.writeText(report);copied=true;}catch{}
+    }
+    if(!copied){
+      area.focus();area.select();
+      try{copied=!!document.execCommand('copy')}catch{}
+    }
+    setText('seat-layout-status',copied
+      ?'좌석 진단 결과 복사 완료. 인증 토큰·비밀번호·매장명은 포함하지 않았습니다. 내용을 채팅에 붙여넣어 주세요.'
+      :'아래 진단 텍스트가 선택됐습니다. 직접 복사해 채팅에 붙여넣어 주세요.');
+    if(copied)toast('좌석 조회 진단 복사 완료');
+  }catch(err){
+    setText('seat-layout-status','진단 결과를 가져오지 못했습니다: '+err.message);
+  }finally{button.disabled=false;}
+}
+$('seat-diagnostic-copy').addEventListener('click',copySeatDiagnostic);
+
 
 const QR_NS='http://www.w3.org/2000/svg';
 function closeEntry(){
