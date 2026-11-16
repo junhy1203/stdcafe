@@ -13,7 +13,7 @@ import {parseSeatLayout,parseSeatResponse,findSeatApiPaths} from './seat-map.mjs
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-seat-diagnostic-v12';
+const APP_VERSION = '2026-11-16-ajax-inspect-v13';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -477,7 +477,8 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             .filter(p=>p.startsWith('/')&&!p.includes('..')&&/\.m?js$/i.test(p))
             .sort((a,b)=>Number(/seat|chart|floor/i.test(b))-Number(/seat|chart|floor/i.test(a)))
             .slice(0,6);
-          const discovered=[...new Set(attempts.flatMap(a=>a.inspect?.candidateApiPaths||[]))];
+          const requestHints=attempts.flatMap(a=>a.inspect?.requestHints||[]);
+          const discovered=[...new Set([...requestHints.map(x=>x.path),...attempts.flatMap(a=>a.inspect?.candidateApiPaths||[])])];
           const inspected=[];
           await Promise.all(scripts.map(async p=>{
             try{
@@ -489,22 +490,54 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               for(const candidate of candidates)discovered.push(candidate);
             }catch{inspected.push({path:p,error:'JavaScript 파일 조회 불가'});}
           }));
-          const lookupPaths=[...new Set(discovered)].slice(0,3);
+          const lookupPaths=[...new Set(discovered)].slice(0,5);
           const probes=[];
           for(const p of lookupPaths){
             const url=new URL(p,UPSTREAM);
             if(url.origin!==UPSTREAM||!url.pathname.startsWith('/mobile/')&&!url.pathname.startsWith('/api/'))continue;
-            for(const [k,v] of [['tk',s.token],['m_value',s.device],['SHOP_NO',shopNo],['FLOOR_NO',floorNo]])url.searchParams.set(k,v);
+            // POST is used only if the real HTML script or form explicitly
+            // declares POST for this allowlisted chart/seat read route.
+            const matchedHints=requestHints.filter(x=>x.path===p);
+            const explicitPost=matchedHints.some(x=>x.method==='POST');
+            const method=explicitPost?'POST':'GET';
+            const params=new URLSearchParams();
+            // Only bind proven app context values to known query/form names.
+            const knownFields={
+              tk:s.token,m_value:s.device,
+              SHOP_NO:shopNo,FLOOR_NO:validFloor?floorNo:'',
+              shop_no:shopNo,floor_no:validFloor?floorNo:'',
+              shopNo:shopNo,floorNo:validFloor?floorNo:'',
+              shop_no_key:shopNo
+            };
+            if(method==='GET'){
+              for(const [key,value] of Object.entries(knownFields))
+                if(['tk','m_value','SHOP_NO','FLOOR_NO'].includes(key)&&value)url.searchParams.set(key,value);
+            } else {
+              const hintedFields=[...new Set(matchedHints.flatMap(h=>h.fields||[]))];
+              // The form's exact parameter names are safer than guessing
+              // undocumented action types, seat IDs, or order identifiers.
+              for(const key of hintedFields)
+                if(Object.hasOwn(knownFields,key)&&knownFields[key])params.set(key,knownFields[key]);
+              if(params.size===0){
+                for(const key of ['tk','m_value','SHOP_NO','FLOOR_NO'])
+                  if(knownFields[key])params.set(key,knownFields[key]);
+              }
+            }
             try{
-              // GET-only and read-only allowlist; no mutation or guessed POST payload.
-              const remote=await upstream(url,{method:'GET',headers:{Accept:'application/json,text/html'}},s.jar);
+              const remote=await upstream(url,{
+                method,
+                headers:{Accept:'application/json,text/html',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded'}:{})},
+                ...(method==='POST'?{body:params.toString()}:{})
+              },s.jar);
               const result=parseSeatResponse(remote.text,'app-seat-api');
-              probes.push({path:p,count:result.summary.count});
+              const type=remote.resp.headers.get('content-type')?.split(';')[0]||'unknown';
+              probes.push({path:p,method,status:remote.resp.status,mime:type,count:result.summary.count,
+                responseCharacters:remote.text.length,reportedMethod:matchedHints.map(h=>h.method)});
               if(result.seats.length){
                 s.lastSeatDiagnostic={
                   checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
                   floorNo,source:'app-seat-api',summary:result.summary,
-                  detectedScripts:scripts,detectedReadApis:lookupPaths,inspected
+                  detectedScripts:scripts,detectedReadApis:lookupPaths,requestHints,inspected
                 };
                 return response(res,200,{
                   ok:true,shopName:readable(home.home_shop_name),floorNo,
@@ -512,19 +545,19 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                   note:result.actualPositions?'공식 API 좌표로 표시':'실제 좌석 상태를 배열한 그림입니다(물리적인 배치는 아님).'
                 });
               }
-            }catch{probes.push({path:p,error:'추가 좌석 데이터 확인 불가'});}
+             }catch(e){probes.push({path:p,method,error:e.status?'HTTP '+e.status:'응답 확인 실패'});}
           }
           s.lastSeatDiagnostic={
             checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
-            floorNo,source:null,detectedScripts:scripts,detectedReadApis:lookupPaths,
+            floorNo,source:null,detectedScripts:scripts,detectedReadApis:lookupPaths,requestHints,
             inspected,probes,
-            attempts:attempts.map(a=>({name:a.name,error:a.error||'',summary:a.summary||null,hints:a.inspect?.hints||null,structure:a.inspect?.structure||null,redirects:a.redirects||[],finalPath:a.finalPath||null,htmlCharacters:a.inspect?.htmlCharacters??null}))
+            attempts:attempts.map(a=>({name:a.name,error:a.error||'',summary:a.summary||null,hints:a.inspect?.hints||null,requestHints:a.inspect?.requestHints||[],structure:a.inspect?.structure||null,redirects:a.redirects||[],finalPath:a.finalPath||null,htmlCharacters:a.inspect?.htmlCharacters??null}))
           };
           return response(res,200,{
             ok:false,shopName:readable(home.home_shop_name),floorNo,seats:[],
             reason:'공식 좌석 화면과 읽기 전용 추가 API에서 좌석별 번호·상태를 확인하지 못했습니다. 좌석총계는 정상이며, 개별 상태는 추정하지 않습니다.',
             inspect:{attempts:s.lastSeatDiagnostic.attempts,detectedScripts:scripts,
-              detectedReadApis:lookupPaths,inspected,probes}
+              detectedReadApis:lookupPaths,requestHints,inspected,probes}
           });
         }
         if (pathname === '/api/entry-qr' && req.method === 'GET') {
