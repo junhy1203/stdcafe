@@ -129,6 +129,25 @@ export function findSeatApiPaths(source){
 /** Inventory exact read requests found in HTML forms and inline scripts.
  * Report only route, HTTP verb and parameter NAMES; never expose source,
  * request bodies, input values, authentication tokens or user identifiers. */
+// Parse a balanced static JavaScript group without executing it.
+function staticGroup(source,start,open='(',close=')',limit=8000){
+  if(source[start]!==open)return '';
+  let depth=0,quote='',escaped=false;
+  for(let i=start;i<Math.min(source.length,start+limit);i++){
+    const ch=source[i];
+    if(quote){
+      if(escaped){escaped=false;continue;}
+      if(ch==='\\'){escaped=true;continue;}
+      if(ch===quote)quote='';
+      continue;
+    }
+    if(ch==='"'||ch==="'"||ch.charCodeAt(0)===96){quote=ch;continue;}
+    if(ch===open)depth++;
+    if(ch===close&&--depth===0)return source.slice(start,i+1);
+  }
+  return '';
+}
+
 export function inspectSeatRequests(html){
   if(typeof html!=='string'||html.length>MAX_HTML)return [];
   const matches=new Map();
@@ -163,14 +182,20 @@ export function inspectSeatRequests(html){
   // jQuery AJAX block or fetch call, not the entire page.
   for(const m of html.matchAll(/<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]{0,250000}?)<\/script>/gi)){
     const body=m[1];
-    for(const call of body.matchAll(/\$\.(?:ajax|get|post)\s*\(([\s\S]{0,2500}?)\)\s*;?/gi)){
-      const raw=call[0],url=/\burl\s*:\s*["']([^"']{1,230})["']/i.exec(raw)
+    for(const call of body.matchAll(/\$\.(?:ajax|get|post)\s*\(/gi)){
+      const openAt=call.index+call[0].lastIndexOf('(');
+      const balanced=staticGroup(body,openAt,'(',')');
+      if(!balanced)continue;
+      const raw=body.slice(call.index,openAt)+balanced;
+      const url=/\burl\s*:\s*["']([^"']{1,230})["']/i.exec(raw)
         ||/\$\.(?:get|post)\s*\(\s*["']([^"']{1,230})["']/i.exec(raw);
       if(!url)continue;
       const method=/\$\.post\s*\(/i.test(raw)?'POST':/\$\.get\s*\(/i.test(raw)?'GET':
         /\b(?:type|method)\s*:\s*["'](GET|POST)["']/i.exec(raw)?.[1]||'UNKNOWN';
-      const data=/\bdata\s*:\s*\{([^}]{0,1000})\}/i.exec(raw);
-      const fields=data?[...data[1].matchAll(/(?:^|,)\s*["']?([A-Za-z][A-Za-z0-9_]{0,45})["']?\s*:/g)].map(x=>x[1]):[];
+      const dataStart=/\bdata\s*:\s*\{/i.exec(raw);
+      const dataGroup=dataStart?staticGroup(raw,dataStart.index+dataStart[0].length-1,'{','}'):null;
+      const fields=dataGroup
+        ?[...dataGroup.slice(1,-1).matchAll(/(?:^|,)\s*["']?([A-Za-z][A-Za-z0-9_]{0,45})["']?\s*:/g)].map(x=>x[1]):[];
       record(url[1],method,fields,'ajax');
     }
     for(const call of body.matchAll(/fetch\s*\(\s*["']([^"']{1,230})["']\s*(?:,\s*\{([^}]{0,1400})\})?\s*\)/gi)){
