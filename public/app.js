@@ -25,6 +25,7 @@ let csrfToken = '';
 let liveAuthenticated = false;
 let liveAvailability = null;
 let seatLayoutMeta = null;
+let selectedSeatZone = '1';
 let seatLayoutRequested = false;
 const $ = id => document.getElementById(id);
 let toastTimer;
@@ -112,7 +113,7 @@ function render(){
   setText('last-update',state.origin==='demo'?'예시':safeDate(d.updatedAt));
   setText('seat-available-total',knownFree!==null?knownFree:seats.length?nAvailable:'—');
   setText('seat-occupied-total',aggregate&&Number.isInteger(aggregate.used)?aggregate.used:seats.length?nOccupied:'—');
-  setText('seats-store-name',d.store.name+(seatLayoutMeta?.floorNo?' · '+seatLayoutMeta.floorNo+'층':''));
+  setText('seats-store-name',d.store.name+' · '+(selectedSeatZone==='2'?'다인실 · 스터디룸':'방음부스실 · 1인실'));
   setText('pass-title',t.name);setText('pass-left',minutesText(t.remainingMinutes));setText('pass-total',minutesText(t.totalMinutes));
   $('pass-bar').style.width=ratio+'%';setText('pass-store',d.store.name);
   setText('pass-seat',d.member.seat||'—');setText('pass-updated',state.origin==='demo'?'예시 데이터':safeDate(d.updatedAt));
@@ -560,7 +561,7 @@ async function loadSeatLayout(force=false){
   setText('seat-layout-status','쌤카페 앱의 실제 좌석 선택 화면을 조회하고 있습니다…');
   seatLayoutRequested=true;
   try{
-    const payload=await requestJson('/api/seat-layout');
+    const payload=await requestJson('/api/seat-layout?floor='+encodeURIComponent(selectedSeatZone));
     if(!payload.ok||!Array.isArray(payload.seats)||payload.seats.length===0){
       seatLayoutMeta={actualPositions:false,floorNo:payload.floorNo||''};
       state.data=normalize({...state.data,seats:[]});render();
@@ -591,6 +592,26 @@ async function loadSeatLayout(force=false){
   }finally{btn.disabled=false;}
 }
 $('seat-layout-refresh').addEventListener('click',()=>loadSeatLayout(true));
+for(const tab of document.querySelectorAll('[data-seat-zone]')){
+  tab.addEventListener('click',async()=>{
+    const next=tab.getAttribute('data-seat-zone');
+    if(!['1','2'].includes(next))return;
+    if(selectedSeatZone===next&&seatLayoutRequested)return;
+    selectedSeatZone=next;
+    seatLayoutRequested=false;
+    seatLayoutMeta=null;
+    for(const other of document.querySelectorAll('[data-seat-zone]')){
+      const active=other.getAttribute('data-seat-zone')===next;
+      other.classList.toggle('active',active);
+      other.setAttribute('aria-pressed',String(active));
+    }
+    state.data=normalize({...state.data,seats:[]});
+    state.selectedSeat=null;
+    render();
+    await loadSeatLayout(true);
+  });
+}
+
 
 function safeSeatDiagnostic(data){
   const page=data?.seatPage||null;
