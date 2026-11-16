@@ -629,3 +629,18 @@ test('varied native seat markup and undocumented status remain conservative',asy
   assert.equal(response.seats[0].status,'available');
   assert.equal(response.seats[0].x,18);assert.equal(response.seats[0].y,22);
 });
+
+
+test('installer includes the separate authenticated seat-map module and UI controls',async()=>{
+  const fs=await import('node:fs/promises');
+  const sh=await fs.readFile(new URL('../deploy/install.sh',import.meta.url),'utf8');
+  const html=await fs.readFile(new URL('../public/index.html',import.meta.url),'utf8');
+  const js=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
+  const server=await fs.readFile(new URL('../server.mjs',import.meta.url),'utf8');
+  assert.match(sh,/install -m 0644[^\n]*"\\$DIR\/seat-map\.mjs"/);
+  assert.match(server,/import \{parseSeatLayout,parseSeatResponse,findSeatApiPaths\} from '\.\/seat-map\.mjs'/);
+  assert.ok(html.includes('id="seat-layout-refresh"'));
+  assert.ok(html.includes('id="seat-layout-status"'));
+  assert.ok(js.includes("requestJson('/api/seat-layout')"));
+  assert.ok(js.includes("parent.classList.add('physical-floor-plan')"));
+});
