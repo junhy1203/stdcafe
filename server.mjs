@@ -8,12 +8,12 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import {parseSeatLayout,parseSeatResponse,findSeatApiPaths} from './seat-map.mjs';
+import {parseSeatLayout,parseSeatResponse,findSeatApiPaths,analyzeSeatDocument,analyzeSeatScript} from './seat-map.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-ajax-inspect-v13';
+const APP_VERSION = '2026-11-16-seat-forensics-v14';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -44,6 +44,25 @@ const response = (res, code, body, extra = {}) => {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store, private', ...extra });
   res.end(JSON.stringify(body));
 };
+
+
+function seatHttpMetadata(resp,body=''){
+  const headers=resp.headers;
+  const type=headers.get('content-type')||'';
+  const charset=/charset\s*=\s*["']?([A-Za-z0-9_-]{1,30})/i.exec(type)?.[1]||null;
+  return {
+    status:resp.status,
+    mime:type.split(';')[0].toLowerCase().trim()||'unknown',
+    charset,
+    contentLengthHeader:Number(headers.get('content-length'))||null,
+    characters:body.length,
+    fingerprint:createHash('sha256').update(body).digest('hex').slice(0,20),
+    cacheControl:(headers.get('cache-control')||'').slice(0,90),
+    hasSetCookie:headers.has('set-cookie'),
+    isHtml:/html/i.test(type),
+    isJson:/json/i.test(type)
+  };
+}
 
 export function loginPayload(username, password, device) {
   const digest = createHash('sha256').update(password + PASSWORD_SUFFIX, 'utf8').digest('hex').toUpperCase();
@@ -454,6 +473,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               if(!/html/i.test(mime)){attempts.push({name,error:'HTML 형식이 아닌 응답',mime:mime.split(';')[0],redirects:remote.redirects});continue;}
               const parsed=parseSeatLayout(remote.text,name);
               attempts.push({name,summary:parsed.summary,inspect:parsed.inspect,
+                http:seatHttpMetadata(remote.resp,remote.text),
                 redirects:remote.redirects,finalPath:remote.finalPath});
               if(parsed.seats.length){
                 s.lastSeatDiagnostic={
@@ -473,10 +493,10 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           }
           // If the WebView only renders a JavaScript shell, discover the seat
           // *read* requests used by its own scripts. Never execute upstream JS.
-          const scripts=[...new Set(attempts.flatMap(a=>a.inspect?.scriptPaths||[]))]
+          const allScripts=[...new Set(attempts.flatMap(a=>a.inspect?.scriptPaths||[]))]
             .filter(p=>p.startsWith('/')&&!p.includes('..')&&/\.m?js$/i.test(p))
-            .sort((a,b)=>Number(/seat|chart|floor/i.test(b))-Number(/seat|chart|floor/i.test(a)))
-            .slice(0,6);
+            .sort((a,b)=>Number(/seat|chart|floor/i.test(b))-Number(/seat|chart|floor/i.test(a)));
+          const scripts=allScripts.slice(0,14);
           const requestHints=attempts.flatMap(a=>a.inspect?.requestHints||[]);
           const discovered=[...new Set([...requestHints.map(x=>x.path),...attempts.flatMap(a=>a.inspect?.candidateApiPaths||[])])];
           const inspected=[];
@@ -485,12 +505,19 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               const url=new URL(p,UPSTREAM);
               if(url.origin!==UPSTREAM)return;
               const remote=await upstream(url,{method:'GET',headers:{Accept:'text/javascript,application/javascript'}},s.jar);
+              const analysis=analyzeSeatScript(remote.text);
               const candidates=findSeatApiPaths(remote.text);
-              inspected.push({path:p,candidates});
-              for(const candidate of candidates)discovered.push(candidate);
+              inspected.push({path:p,candidates,
+                http:seatHttpMetadata(remote.resp,remote.text),code:analysis});
+              for(const hint of analysis.requestHints||[])requestHints.push(hint);
+              for(const candidate of [...candidates,...(analysis.requestHints||[]).map(h=>h.path)])discovered.push(candidate);
             }catch{inspected.push({path:p,error:'JavaScript 파일 조회 불가'});}
           }));
-          const lookupPaths=[...new Set(discovered)].slice(0,5);
+          // The personal.do form with a checkbox is NOT evidence for a seat API.
+          // Do not issue arbitrary POST requests to upstream HTML forms.
+          const lookupPaths=[...new Set(discovered)]
+            .filter(p=>p!=='/mobile/purchase/personal.do')
+            .slice(0,10);
           const probes=[];
           for(const p of lookupPaths){
             const url=new URL(p,UPSTREAM);
@@ -498,8 +525,12 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             // POST is used only if the real HTML script or form explicitly
             // declares POST for this allowlisted chart/seat read route.
             const matchedHints=requestHints.filter(x=>x.path===p);
-            const explicitPost=matchedHints.some(x=>x.method==='POST');
+            const confirmedAjax=matchedHints.filter(h=>['ajax','fetch','load'].includes(h.source));
+            const explicitPost=confirmedAjax.some(x=>x.method==='POST');
             const method=explicitPost?'POST':'GET';
+            const evidence=explicitPost?'script-confirmed-post':
+              confirmedAjax.length?'script-confirmed-get':
+              matchedHints.some(x=>x.source==='form')?'form-only (not submitted)':'static-path-only';
             const params=new URLSearchParams();
             // Only bind proven app context values to known query/form names.
             const knownFields={
@@ -513,7 +544,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               for(const [key,value] of Object.entries(knownFields))
                 if(['tk','m_value','SHOP_NO','FLOOR_NO'].includes(key)&&value)url.searchParams.set(key,value);
             } else {
-              const hintedFields=[...new Set(matchedHints.flatMap(h=>h.fields||[]))];
+              const hintedFields=[...new Set(confirmedAjax.flatMap(h=>h.fields||[]))];
               // The form's exact parameter names are safer than guessing
               // undocumented action types, seat IDs, or order identifiers.
               for(const key of hintedFields)
