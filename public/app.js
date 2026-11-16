@@ -646,6 +646,8 @@ function safeSeatDiagnostic(data){
         hasFloorNo:!!page?.hasFloorNo,
         appCookieCount:page?.observedCookieCount??null,
         upstreamClient:page?.clientType||null,
+        floorSelectionOrigin:page?.floorSource||null,
+        ticketRestricted:page?.passFiltered===true,
         homeResponseKeys:page?.homeResponseKeys||[],
         aggregateSeatCounts:page?.expectedSeatCounts||null
       },
@@ -698,25 +700,31 @@ $('seat-diagnostic-save').addEventListener('click',async()=>{
   const button=$('seat-diagnostic-save');
   button.disabled=true;
   try{
-    const data=await requestJson('/api/diagnostics');
-    if(!data.seatPage){
-      setText('seat-layout-status','저장할 좌석 진단이 없습니다. 먼저 개별 좌석 상태 조회를 실행해 주세요.');
-      return;
+    // Collect both user-visible native seat zones with read-only GETs.
+    // Never send a seat selection, entry or ticket mutation request.
+    const zones={};
+    for(const floor of ['1','2']){
+      setText('seat-layout-status',(floor==='1'?'방음부스실·1인실':'다인실·스터디룸')+' 조회 진단 수집 중…');
+      let error=null;
+      try{await requestJson('/api/seat-layout?floor='+floor);}
+      catch(e){error=String(e.message||'조회 실패').slice(0,140);}
+      const current=await requestJson('/api/diagnostics');
+      zones[floor]={...safeSeatDiagnostic(current),zoneLabel:floor==='1'?'방음부스실·1인실':'다인실·스터디룸',fetchError:error};
     }
-    const content=JSON.stringify(safeSeatDiagnostic(data),null,2);
+    const content=JSON.stringify({format:'stdcafe-dual-zone-readonly-diagnostics',generatedAt:new Date().toISOString(),zones},null,2);
     const file=new Blob([content],{type:'application/json;charset=utf-8'});
     const objectUrl=URL.createObjectURL(file);
     try{
       const link=document.createElement('a');
       link.href=objectUrl;
-      link.download='stdcafe-seat-diagnostics-v14.json';
+      link.download='stdcafe-both-room-diagnostics-v16.json';
       document.body.append(link);
       link.click();
       link.remove();
     }finally{
       setTimeout(()=>URL.revokeObjectURL(objectUrl),10000);
     }
-    setText('seat-layout-status','좌석 진단 JSON 저장 요청을 완료했어. 파일을 이 대화에 첨부하면 분석에 활용할 수 있어. 비밀번호·토큰·쿠키 값·원본 페이지는 제외했어.');
+    setText('seat-layout-status','두 구역의 진단 파일을 저장했어. 파일을 채팅에 첨부하면 실제 좌석 배치도 원본 구조를 함께 분석할 수 있어. 인증정보·원본 HTML은 제외했어.');
   }catch(err){
     setText('seat-layout-status','좌석 진단 JSON 저장 실패: '+err.message);
   }finally{button.disabled=false;}
