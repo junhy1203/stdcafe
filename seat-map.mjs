@@ -209,6 +209,152 @@ export function inspectSeatRequests(html){
   return [...matches.values()].slice(0,30);
 }
 
+
+/**
+ * Bounded structural diagnostics for authenticated native WebView responses.
+ * Never return raw HTML/JS, text snippets, input values, headers with credentials,
+ * QR codes, customer identities, cookie values or query parameter values.
+ */
+function safePathOnly(raw){
+  if(typeof raw!=='string'||raw.length>500)return null;
+  try{
+    const url=new URL(decodeHtml(raw),'https://m.ssamcafe.com');
+    if(url.origin!=='https://m.ssamcafe.com')return null;
+    if(!/^\/[A-Za-z0-9_./-]{1,230}$/.test(url.pathname))return null;
+    return url.pathname;
+  }catch{return null;}
+}
+function fieldName(value){
+  return typeof value==='string'&&/^[A-Za-z_][A-Za-z0-9_-]{0,45}$/.test(value)?value:null;
+}
+function jsonOutline(value,depth=0,seen={count:0}){
+  if(seen.count++>=150)return {type:'truncated'};
+  if(value===null)return {type:'null'};
+  if(Array.isArray(value)){
+    return {type:'array',length:value.length,sample:depth<4&&value.length?jsonOutline(value[0],depth+1,seen):null};
+  }
+  if(typeof value==='object'){
+    const properties={};
+    for(const key of Object.keys(value).slice(0,40)){
+      const valid=fieldName(key);
+      if(!valid || /^(?:password|passwd|pwd|secret|token|session|cookie|authorization|csrf)$/i.test(valid))continue;
+      properties[valid]=depth>=4?typeof value[key]:jsonOutline(value[key],depth+1,seen);
+    }
+    return {type:'object',propertyCount:Object.keys(value).length,properties};
+  }
+  return {type:typeof value,...(typeof value==='string'?{length:value.length}:null)};
+}
+export function analyzeSeatDocument(raw,mime=''){
+  if(typeof raw!=='string'||raw.length>MAX_HTML)return {invalid:true};
+  const base={characters:raw.length,format:/json/i.test(mime)?'json':/<(?:html|body|div|script|form|table|svg)\b/i.test(raw)?'html':'text'};
+  const trimmed=raw.trim();
+  if(/^[\[{]/.test(trimmed)){
+    try {
+      const value=JSON.parse(trimmed);
+      return {...base,format:'json',outline:jsonOutline(value)};
+    }catch{}
+  }
+  // For non-HTML responses, record only length and classification.
+  if(!/<[a-z][\s>]/i.test(raw)){
+    return {...base,format:'text',markers:{
+      containsJson:/"(?:seatList|seatData|SEAT_NO)"\s*:/i.test(raw),
+      mentionsSeat:/seat|좌석/i.test(raw),
+      mentionsError:/error|오류|에러|실패/i.test(raw)
+    }};
+  }
+  const html=raw;
+  const tags=['html','head','body','form','input','select','option','button','table','thead','tbody','tr','th','td','div','span','a','img','script','style','link','canvas','svg','iframe','section','ul','li'];
+  const tagCounts={};
+  for(const tag of tags) {
+    const count=[...html.matchAll(new RegExp('<'+tag+'(?=[\\s/>])','gi'))].length;
+    if(count)tagCounts[tag]=count;
+  }
+  const forms=[];
+  for(const m of html.matchAll(/<form\b([^>]{0,2600})>([\s\S]{0,60000}?)<\/form>/gi)){
+    const attrs=htmlAttrs('<form '+m[1]+'>');
+    const fields=[];
+    for(const input of m[2].matchAll(/<(?:input|select|textarea)\b[^>]{0,850}>/gi)){
+      const at=htmlAttrs(input[0]),name=fieldName(at.name);
+      if(!name)continue;
+      fields.push({name,kind:input[0].match(/^<(\w+)/)?.[1].toLowerCase()||'input',type:fieldName(at.type)||null});
+      if(fields.length>=45)break;
+    }
+    forms.push({action:safePathOnly(attrs.action)||null,method:/^post$/i.test(attrs.method||'')?'POST':'GET',
+      fieldCount:fields.length,fields,hasMultipart:/multipart\/form-data/i.test(attrs.enctype||'')});
+    if(forms.length>=24)break;
+  }
+  const staticLinks=[];
+  for(const m of html.matchAll(/["'\x60]((?:https:\/\/m\.ssamcafe\.com)?\/(?:mobile|api)\/[A-Za-z0-9_./-]{1,220}\.do)(?:\?[^"'\x60]{0,200})?["'\x60]/gi)){
+    const path=safePathOnly(m[1]);
+    if(path&&!staticLinks.includes(path))staticLinks.push(path);
+    if(staticLinks.length>=70)break;
+  }
+  const scriptStats=[];
+  for(const m of html.matchAll(/<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]{0,300000}?)<\/script>/gi)){
+    const js=m[1];
+    const count=regex=>[...js.matchAll(regex)].length;
+    const namedFunctions=[...new Set([...js.matchAll(/\bfunction\s+([A-Za-z_$][\w$]{1,48})\s*\(/g)]
+      .map(match=>match[1]).filter(n=>!/password|secret|token|auth|user|account|name|email|phone|cookie/i.test(n)))].slice(0,30);
+    const hooks=[...new Set([...js.matchAll(/\b(?:seat|chart|floor|place|area|table|room|map|layout|choice|personal)[A-Za-z0-9_$]{0,38}\b/gi)]
+      .map(m=>m[0]).filter(n=>!/password|secret|token|auth|user|account|name|email|phone|cookie/i.test(n)))].slice(0,36);
+    scriptStats.push({
+      characters:js.length,
+      operations:{
+        jqueryAjax:count(/\$\.ajax\s*\(/g),jqueryGet:count(/\$\.get\s*\(/g),
+        jqueryPost:count(/\$\.post\s*\(/g),fetch:count(/\bfetch\s*\(/g),
+        xhr:count(/XMLHttpRequest/g),jqueryLoad:count(/\.load\s*\(/g),
+        formSubmit:count(/\.submit\s*\(|\.submitForm\s*\(/g),
+        documentWrite:count(/document\.write\s*\(/g),
+        domReady:count(/\.ready\s*\(|DOMContentLoaded/g),
+        navigate:count(/location\.(?:href|replace|assign)/g),
+        imageOrCanvas:count(/\b(?:canvas|drawImage|imageMap|mapArea)\b/gi)
+      },
+      namedFunctions,hooks,staticSeatRequests:inspectSeatRequests('<script>'+js+'</script>').slice(0,16)
+    });
+    if(scriptStats.length>=90)break;
+  }
+  const attributes={};
+  for(const m of html.matchAll(/\s(data-[a-z][\w-]{0,45})\s*=/gi)){
+    const key=m[1].toLowerCase();
+    if(!/seat|room|floor|chart|place|status|use|type|position|pos-|x$|y$/i.test(key))continue;
+    attributes[key]=(attributes[key]||0)+1;
+    if(Object.keys(attributes).length>45)break;
+  }
+  const relevantClasses=new Set(),relevantIds=new Set();
+  for(const tag of html.matchAll(/<(?:div|span|table|tr|td|li|button|a|section)\b[^>]{0,1200}>/gi)){
+    const attrs=htmlAttrs(tag[0]);
+    if(attrs.class) for(const cls of attrs.class.split(/\s+/)){
+      if(/seat|chair|chart|floor|room|map|grid|empty|occup|vacan|table|board|layout/i.test(cls)&&fieldName(cls))relevantClasses.add(cls);
+    }
+    if(attrs.id&&/seat|chair|chart|floor|room|map|grid|table|layout/i.test(attrs.id)&&fieldName(attrs.id))relevantIds.add(attrs.id);
+    if(relevantClasses.size+relevantIds.size>100)break;
+  }
+  const markers={};
+  const words={
+    login:/로그인|login\s*required|세션\s*만료/i,
+    error:/오류|에러|error|not\s*found|실패/i,
+    noSeats:/좌석이?\s*없|빈\s*자리\s*없|no\s*seats/i,
+    reservation:/예약|booking/i,
+    selectFloor:/층\s*선택|층별|floor/i,
+    payment:/결제|구매|purchase/i,
+    drawLayout:/좌석\s*배치|배치도|seat\s*map|chart/i,
+    scriptRendered:/appendChild|innerHTML|\.html\(|\.append\(|drawImage|renderSeat/i
+  };
+  for(const [name,regex] of Object.entries(words))markers[name]=regex.test(html);
+  const images=[];
+  for(const m of html.matchAll(/<img\b[^>]{0,1200}>/gi)){
+    const attrs=htmlAttrs(m[0]),p=safePathOnly(attrs.src);
+    if(p&&!images.includes(p))images.push(p);
+    if(images.length>=25)break;
+  }
+  return {
+    ...base,format:'html',tagCounts,forms,staticDoPaths:staticLinks,
+    externalJsPaths:scriptPaths(html),inlineScripts:scriptStats,
+    relevantDom:{dataAttributeCounts:attributes,classes:[...relevantClasses].slice(0,45),ids:[...relevantIds].slice(0,45)},
+    imagePaths:images,markers
+  };
+}
+
 function arrayCandidates(html){
   const inputs=[];
   for(const m of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/json["'][^>]*>([\s\S]{0,200000}?)<\/script>/gi))inputs.push(decodeHtml(m[1]));
@@ -298,6 +444,7 @@ export function parseSeatLayout(html,source='enter'){
       candidateApiPaths:findSeatApiPaths(html),
       requestHints:inspectSeatRequests(html),
       structure:pageStructure(html),
+      forensic:analyzeSeatDocument(html,'text/html'),
       hints:{
         hasSeatKeyword:/seat|좌석|자리/i.test(html),
         hasWebviewData:/chart|canvas|floor/i.test(html),
@@ -329,6 +476,6 @@ export function parseSeatResponse(raw,source='api'){
   return {
     source,seats,actualPositions:seats.length>2&&positions===seats.length,
     summary:{count:seats.length,available:count('available'),occupied:count('occupied'),unknown:count('unknown'),coordinates:positions,conflicts},
-    inspect:{htmlCharacters:raw.length,scriptPaths:[],candidateApiPaths:[],hints:{hasSeatKeyword:rows.length>0,hasWebviewData:false,hasJsonSeatList:true}}
+    inspect:{htmlCharacters:raw.length,scriptPaths:[],candidateApiPaths:[],forensic:analyzeSeatDocument(raw,'application/json'),hints:{hasSeatKeyword:rows.length>0,hasWebviewData:false,hasJsonSeatList:true}}
   };
 }
