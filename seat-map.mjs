@@ -375,7 +375,7 @@ export function analyzeSeatDocument(raw,mime=''){
   const images=[];
   for(const m of html.matchAll(/<img\b[^>]{0,1200}>/gi)){
     const attrs=htmlAttrs(m[0]),p=safePathOnly(attrs.src);
-    if(p&&!images.includes(p))images.push(p);
+    if(p&&/seat|chart|floor|room|layout|map/i.test(p)&&!/user|member|profile|avatar|account|qr|personal/i.test(p)&&!images.includes(p))images.push(p);
     if(images.length>=25)break;
   }
   return {
