@@ -865,15 +865,16 @@ $('seat-diagnostic-save').addEventListener('click',async()=>{
 
 
 const QR_NS='http://www.w3.org/2000/svg';
+let accessMode='enter';
 function closeEntry(){
   $('entry-overlay').hidden=true;
   $('entry-qr-canvas').replaceChildren();
-  setText('entry-status','입장 QR을 닫았습니다. 다시 열면 공식 서버에서 새로 조회합니다.');
+  setText('entry-status','QR을 닫았습니다. 다음에 열면 공식 서버에서 다시 조회합니다.');
 }
 async function refreshEntryQr(){
   const btn=$('entry-reload');btn.disabled=true;
   $('entry-qr-canvas').replaceChildren();
-  setText('entry-status','현재 본인 계정의 쌤카페 공식 입장 QR을 조회하고 있습니다…');
+  setText('entry-status','현재 본인 계정의 쌤카페 공식 QR을 조회하고 있습니다…');
   try{
     const data=await requestJson('/api/entry-qr');
     if(typeof data.qr!=='string' || data.qr.length<1)throw Error('서버에서 유효한 QR 값을 받지 못했습니다.');
@@ -884,7 +885,7 @@ async function refreshEntryQr(){
     const total=qr.getModuleCount(),pad=4;
     const svg=document.createElementNS(QR_NS,'svg');
     svg.setAttribute('viewBox','0 0 '+(total+pad*2)+' '+(total+pad*2));
-    svg.setAttribute('role','img');svg.setAttribute('aria-label','매장 스캐너에 제시할 공식 쌤카페 입장 QR');
+    svg.setAttribute('role','img');svg.setAttribute('aria-label','매장 스캐너에 제시할 본인 쌤카페 공식 QR');
     const white=document.createElementNS(QR_NS,'rect');
     white.setAttribute('x','0');white.setAttribute('y','0');
     white.setAttribute('width',String(total+pad*2));white.setAttribute('height',String(total+pad*2));
@@ -898,21 +899,37 @@ async function refreshEntryQr(){
     }
     svg.append(dots);
     $('entry-qr-canvas').replaceChildren(svg);
-    setText('entry-status',data.shopName
-      ?data.shopName+' · 공식 앱 홈의 QR을 표시했습니다. 현장 스캐너에 제시해 주세요.'
-      :'공식 앱 홈의 QR을 표시했습니다. 현장 스캐너에 제시해 주세요.');
+    setText('entry-status',(data.shopName?data.shopName+' · ':'')+
+      (accessMode==='exit'
+        ?'공식 앱 홈의 QR입니다. 해당 매장의 퇴실 처리에 이 QR이 사용되는지는 아직 확인되지 않았습니다. 현장에서 검증해 주세요.'
+        :'공식 앱 홈의 QR입니다. 매장 QR 스캐너에 제시한 뒤 실제 입실 처리를 확인해 주세요.'));
   }catch(err){
-    setText('entry-status','입장 QR을 표시하지 못했습니다: '+err.message);
+    setText('entry-status','공식 QR을 표시하지 못했습니다: '+err.message);
   }finally{btn.disabled=false;}
 }
-async function openEntry(){
+async function openAccess(mode='enter'){
   if(!liveAuthenticated){toast('설정에서 쌤카페 계정으로 먼저 로그인해 주세요.');showModal();return;}
+  accessMode=mode==='exit'?'exit':'enter';
+  setText('entry-title',accessMode==='exit'?'현장 퇴실 QR':'현장 입실 QR');
+  setText('access-explanation',accessMode==='exit'
+    ?'공식 앱 홈에서 받은 본인 QR입니다. 이 QR의 퇴실 스캐너 사용 가능 여부는 실사용 테스트 전입니다. 퇴실이 처리되지 않으면 공식 앱에서 퇴실해 주세요. 웹은 퇴실 완료를 임의로 표시하지 않습니다.'
+    :'공식 앱 홈에서 받은 본인 QR입니다. 매장의 QR 스캐너에 제시한 뒤 실제 입실 상태를 확인하세요. 좌석을 눌러도 자동으로 입실되지는 않습니다.');
   $('entry-overlay').hidden=false;
   await refreshEntryQr();
 }
-for(const id of ['entry-open-home','entry-open-seats'])$(id).addEventListener('click',openEntry);
+for(const id of ['entry-open-home','entry-open-seats'])$(id).addEventListener('click',()=>openAccess('enter'));
+for(const id of ['exit-open-home','exit-open-seats'])$(id).addEventListener('click',()=>openAccess('exit'));
 for(const id of ['entry-close','entry-dismiss'])$(id).addEventListener('click',closeEntry);
 $('entry-reload').addEventListener('click',refreshEntryQr);
+$('access-verify').addEventListener('click',async()=>{
+  const button=$('access-verify');button.disabled=true;
+  try{
+    const ok=await fetchLive();
+    setText('entry-status',ok
+      ?'공식 앱 정보를 다시 조회했습니다. 입·퇴실 완료는 현재 좌석/이용 내역이 실제로 변경됐는지 확인해 주세요.'
+      :'현재 공식 서버에서 입·퇴실 상태를 확정할 수 없습니다. 매장 스캐너 또는 쌤카페 공식 앱에서 확인해 주세요.');
+  }finally{button.disabled=false;}
+});
 $('entry-overlay').addEventListener('click',e=>{if(e.target===$('entry-overlay'))closeEntry();});
 $('availability-refresh').addEventListener('click',async()=>{
   if(!liveAuthenticated){toast('먼저 로그인해 주세요.');showModal();return;}
