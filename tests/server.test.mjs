@@ -343,3 +343,80 @@ test('cached HTML shell without structured panel is repaired without a null erro
   assert.equal(home.children[1],live);
   assert.equal(recover(),panel,'must not recreate an existing panel');
 });
+
+test('authenticated entry QR and counted available seats from official home fields', async () => {
+  const entryCode='QR_SENSITIVE_ENTRY_TOKEN_MUST_NOT_LEAK';
+  const requests=[];
+  const remote=async(url,options)=>{
+    const pathname=new URL(url).pathname;
+    if(pathname==='/api/app.do'){
+      const payload=JSON.parse(options.body);requests.push(payload.cmd);
+      if(payload.cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'AUTH_TEST_TOKEN',name:'회원'}}),'application/json');
+      if(payload.cmd==='1100')return mkResponse(JSON.stringify({rspcode:'0000',result:{
+        home_shop_no:'123',home_shop_name:'테스트 독서실',home_floor_no:'2',
+        home_shop_tot_p:'42',home_shop_use_p:'17',
+        home_shop_tot_g:'7',home_shop_use_g:'7',
+        home_shop_tot_l:'30',home_shop_use_l:'31',
+        home_shop_user_remain_m:'0',
+        home_qr_code:entryCode
+      }}),'application/json');
+      if(payload.cmd==='1101')return mkResponse(JSON.stringify({rspcode:'0000',result:{lsat_goods_use_info:[]}}),'application/json');
+      throw Error('Unexpected API command '+payload.cmd);
+    }
+    return mkResponse('<html><body><div>항목</div></body></html>');
+  };
+  const server=createApp({fetchImpl:remote});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const first=await fetch(base+'/api/entry-qr');
+    assert.equal(first.status,401);
+    const init=await fetch(base+'/api/session');
+    const csrf=(await init.json()).csrf;
+    const Cookie=init.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'demo',password:'fake'})});
+    assert.equal(login.status,200);
+    const status=await fetch(base+'/api/status',{headers:{Cookie}});
+    const statusString=await status.text();const data=JSON.parse(statusString);
+    assert.equal(data.live.seatAvailability.personal.total,42);
+    assert.equal(data.live.seatAvailability.personal.used,17);
+    assert.equal(data.live.seatAvailability.personal.available,25);
+    assert.equal(data.live.seatAvailability.group.available,0);
+    assert.equal(data.live.seatAvailability.locker.available,null,'invalid used > total must remain unknown');
+    assert.equal(data.live.seatAvailability.confirmedShop,true);
+    assert.equal(data.live.currentShop.floorNo,'2');
+    assert.equal(data.member.ticket.remainingMinutes,null,'home_shop_user_remain_m is monetary, not time');
+    assert.equal(data.live.entryQrAvailable,true);
+    assert.equal(statusString.includes(entryCode),false,'QR must not be in ordinary status');
+    const diag=await fetch(base+'/api/diagnostics',{headers:{Cookie}});
+    assert.equal((await diag.text()).includes(entryCode),false,'QR must not be in diagnostics');
+    const entry=await fetch(base+'/api/entry-qr',{headers:{Cookie}});
+    assert.equal(entry.status,200);
+    assert.equal(entry.headers.get('cache-control'),'no-store, private');
+    const reply=await entry.json();
+    assert.equal(reply.qr,entryCode);
+    assert.equal(reply.shopName,'테스트 독서실');
+    assert.deepEqual(requests,['1201','1100','1101','1100']);
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
+
+test('bundled QR renderer produces scannable matrix for official app code',async()=>{
+  const module=await import('../public/vendor/qrcode.mjs');
+  const qr=module.default(0,'M');
+  qr.addData('USER_TEST_CHECKIN','Byte');qr.make();
+  assert.ok(qr.getModuleCount()>=21);
+  let black=0;
+  for(let r=0;r<qr.getModuleCount();r++)for(let c=0;c<qr.getModuleCount();c++)if(qr.isDark(r,c))black++;
+  assert.ok(black>80);
+});
+
+test('entry, availability and QR elements exist in browser shell',async()=>{
+  const fs=await import('node:fs/promises');
+  const html=await fs.readFile(new URL('../public/index.html',import.meta.url),'utf8');
+  const js=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
+  for(const id of ['availability-counters','availability-refresh','entry-open-home','entry-open-seats','entry-overlay','entry-close','entry-dismiss','entry-qr-canvas','entry-status','entry-reload']){
+    assert.ok(html.includes('id="'+id+'"'),'Missing HTML element '+id);
+    assert.ok(js.includes("'"+id+"'"),'Missing JS reference '+id);
+  }
+  assert.ok(html.includes('/seats-qr-v9')||html.includes('seats-qr-v9'),'cache-version not updated');
+});
