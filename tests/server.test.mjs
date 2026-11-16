@@ -822,3 +822,86 @@ test('explicit POST chart request is mirrored as a read-only seat fetch',async()
     assert.ok(!diagRaw.includes('PRIVATE_AUTH'));
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+
+test('forensic HTML diagnostics expose structure but never form or script secret values',async()=>{
+  const {analyzeSeatDocument,analyzeSeatScript}=await import('../seat-map.mjs');
+  const privateValue='SENSITIVE_PRIVATE_ACCOUNT_12345';
+  const page='<html><form action="/mobile/purchase/personal.do" method="POST"><input type="hidden" name="checkbox" value="'+privateValue+'"><select name="FLOOR_NO"><option value="1">1층</option></select></form>'+
+    '<script>const privateToken="'+privateValue+'";$.ajax({url:"/mobile/purchase/chart.do",type:"POST",data:{SHOP_NO:$("#shop").val()},success:function(data){}});</script>'+
+    '<div class="seat-board" id="seat-chart-area" data-seat-no="10"></div><img src="/images/seat-plan.png"></html>';
+  const info=analyzeSeatDocument(page,'text/html');
+  assert.equal(info.format,'html');
+  assert.equal(info.forms[0].method,'POST');
+  assert.deepEqual(info.forms[0].fields.map(x=>x.name),['checkbox','FLOOR_NO']);
+  assert.ok(info.staticDoPaths.includes('/mobile/purchase/chart.do'));
+  assert.equal(info.tagCounts.form,1);
+  assert.equal(info.tagCounts.script,1);
+  assert.equal(info.inlineScripts[0].operations.jqueryAjax,1);
+  assert.ok(info.relevantDom.classes.includes('seat-board'));
+  assert.ok(info.imagePaths.includes('/images/seat-plan.png'));
+  assert.ok(!JSON.stringify(info).includes(privateValue));
+  assert.ok(!JSON.stringify(analyzeSeatScript('const privateToken="'+privateValue+'";$.get("/mobile/purchase/chart.do");')).includes(privateValue));
+});
+test('nested app JSON describes safe schema and status enums without private values',async()=>{
+  const {analyzeSeatDocument}=await import('../seat-map.mjs');
+  const input=JSON.stringify({rspcode:'0000',result:JSON.stringify({seatList:[
+    {SEAT_NO:'1',USE_YN:'N',nickname:'DO_NOT_PRINT_PERSON_123'},
+    {SEAT_NO:'2',USE_YN:'Y',nickname:'DO_NOT_PRINT_PERSON_123'}
+  ],user:{id:'DO_NOT_PRINT_PERSON_123'}})});
+  const result=analyzeSeatDocument(input,'application/json');
+  assert.equal(result.format,'json');
+  assert.equal(result.outline.properties.result.type,'json-string');
+  assert.equal(result.statusCodes.USE_YN.N,1);
+  assert.equal(result.statusCodes.USE_YN.Y,1);
+  assert.equal(JSON.stringify(result).includes('DO_NOT_PRINT_PERSON_123'),false);
+});
+test('failed native seat lookup includes redacted HTML and chart response forensics',async()=>{
+  const secret='NONPUBLIC_PASSWORD_OR_MEMBER_DATA';
+  const calls=[];
+  const remote=async(url,opts)=>{
+    const u=new URL(url);calls.push({path:u.pathname,method:opts.method||'GET'});
+    if(u.pathname==='/api/app.do'){
+      const cmd=JSON.parse(opts.body).cmd;
+      if(cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'PRIVATE_AUTH_TOKEN',name:'SECRET_PERSON'}}),'application/json');
+      if(cmd==='1100')return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'17',home_floor_no:'1',home_shop_name:'SECRET_CAFE'}}),'application/json');
+    }
+    if(u.pathname==='/mobile/purchase/personal.do')
+      return mkResponse('<html><form action="/mobile/purchase/personal.do" method="POST"><input name="checkbox" value="'+secret+'"></form><script src="/js/seat-chart.js"></script><script>var seatUrl="/mobile/purchase/chart.do";</script></html>','text/html');
+    if(u.pathname==='/mobile/enterSeatView.do')
+      return mkResponse('<html><script>var chartUrl="/mobile/purchase/chart.do";</script></html>','text/html');
+    if(u.pathname==='/mobile/seatChangeView.do')
+      return new Response(null,{status:302,headers:{Location:'/mobile/error/notEnterRoomInfo.do'}});
+    if(u.pathname==='/mobile/error/notEnterRoomInfo.do')
+      return mkResponse('<html><p>현재 입실 상태가 아닙니다</p></html>','text/html');
+    if(u.pathname==='/js/seat-chart.js')
+      return mkResponse('function renderSeatChart(){ $.get("/mobile/purchase/chart.do", function(){}); }','text/javascript');
+    if(u.pathname==='/mobile/purchase/chart.do')
+      return mkResponse('<html><form method="GET" action="/mobile/purchase/chart.do"><input name="SHOP_NO" value="'+secret+'"></form><p>층 선택 필요</p></html>','text/html');
+    throw Error('Unexpected upstream path '+u.pathname);
+  };
+  const server=createApp({fetchImpl:remote});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const init=await fetch(base+'/api/session'),v=await init.json(),Cookie=init.headers.get('set-cookie').split(';')[0];
+    const logged=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':v.csrf},body:JSON.stringify({username:'person',password:'private'})});
+    assert.equal(logged.status,200);
+    const response=await fetch(base+'/api/seat-layout',{headers:{Cookie}});
+    assert.equal(response.status,200);
+    assert.equal((await response.json()).ok,false);
+    const diagResponse=await fetch(base+'/api/diagnostics',{headers:{Cookie}});
+    const diagRaw=await diagResponse.text(),diag=JSON.parse(diagRaw);
+    assert.equal(diag.seatPage.attempts[0].forensic.forms[0].fields[0].name,'checkbox');
+    assert.ok(diag.seatPage.attempts[0].http.fingerprint);
+    assert.equal(diag.seatPage.attempts[0].http.mime,'text/html');
+    assert.ok(diag.seatPage.inspected.find(x=>x.path==='/js/seat-chart.js').code.operations.jqueryGet>0);
+    const chart=diag.seatPage.probes.find(x=>x.path==='/mobile/purchase/chart.do');
+    assert.ok(chart);
+    assert.equal(chart.responseAnalysis.format,'html');
+    assert.ok(chart.responseAnalysis.forms.some(x=>x.fields.some(v=>v.name==='SHOP_NO')));
+    assert.equal(chart.http.status,200);
+    assert.ok(!calls.some(x=>x.path==='/mobile/purchase/personal.do'&&x.method==='POST'),'do not replay arbitrary checkbox POST');
+    for(const value of [secret,'PRIVATE_AUTH_TOKEN','SECRET_PERSON','SECRET_CAFE'])assert.ok(!diagRaw.includes(value),'leaked '+value);
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
