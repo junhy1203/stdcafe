@@ -25,6 +25,7 @@ let csrfToken = '';
 let liveAuthenticated = false;
 let liveAvailability = null;
 let seatLayoutMeta = null;
+let latestAccessState = null;
 let selectedSeatZone = '1';
 let seatLayoutRequested = false;
 const $ = id => document.getElementById(id);
@@ -627,12 +628,13 @@ async function fetchLive(){
   if(!liveAuthenticated){bridgeError('먼저 로그인해 주세요.');return false;}
   const btn=$('refresh');btn.disabled=true;bridgeStatus('쌤카페 서버의 4개 회원 페이지 조회 중…');lookupSummary('로그인 성공 · 실제 회원 페이지 4개를 조회하고 있습니다…');clearBridgeError();
   // Clear stale/demo values before the request, including after a page reload.
-  liveAvailability=null;seatLayoutMeta=null;seatLayoutRequested=false;
+  liveAvailability=null;latestAccessState=null;seatLayoutMeta=null;seatLayoutRequested=false;
   state.data=normalize(liveBlank());state.origin='live';state.endpoint=null;state.selectedSeat=null;render();
   try{
     const received=await requestJson('/api/status');
     state.data=normalize(received);
     liveAvailability=received.live?.seatAvailability||null;
+    latestAccessState=received.live?.accessState||null;
     const sources=received.live?.sources||{};
     showLiveSources(sources);
     renderStructured(received.live);
@@ -925,9 +927,15 @@ $('access-verify').addEventListener('click',async()=>{
   const button=$('access-verify');button.disabled=true;
   try{
     const ok=await fetchLive();
+    const raw=latestAccessState;
+    const codes=raw?[
+      raw.homeUseStateCode?'홈 이용 상태 '+raw.homeUseStateCode:null,
+      raw.ticketSeatStateCode?'이용권 좌석 상태 '+raw.ticketSeatStateCode:null,
+      raw.recentUseStateCode?'최근 이용 상태 '+raw.recentUseStateCode:null
+    ].filter(Boolean).join(' · '):'';
     setText('entry-status',ok
-      ?'공식 앱 정보를 다시 조회했습니다. 입·퇴실 완료는 현재 좌석/이용 내역이 실제로 변경됐는지 확인해 주세요.'
-      :'현재 공식 서버에서 입·퇴실 상태를 확정할 수 없습니다. 매장 스캐너 또는 쌤카페 공식 앱에서 확인해 주세요.');
+      ?'공식 앱 정보를 다시 조회했습니다.'+(codes?' 원본 코드: '+codes+'.':'')+' 코드의 입실·퇴실 의미는 미검증이므로 공식 앱 또는 현장 스캐너에서 최종 확인해 주세요.'
+      :'현재 공식 서버에서 입·퇴실 상태를 확인할 수 없습니다. 쌤카페 공식 앱에서 확인해 주세요.');
   }finally{button.disabled=false;}
 });
 $('entry-overlay').addEventListener('click',e=>{if(e.target===$('entry-overlay'))closeEntry();});
