@@ -12,7 +12,7 @@ import path from 'node:path';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-ui-fix-v8';
+const APP_VERSION = '2026-11-16-seats-qr-v9';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -156,6 +156,8 @@ function readable(v, max=140) {
   if (typeof v !== 'string' && typeof v !== 'number') return '';
   return String(v).trim().slice(0,max);
 }
+function validCount(v){const raw=readable(v,12);if(!/^\d{1,6}$/.test(raw))return null;const n=Number(raw);return Number.isSafeInteger(n)&&n<=999999?n:null;}
+function seatCapacity(total,used){const t=validCount(total),u=validCount(used);return {total:t,used:u,available:t!==null&&u!==null&&u<=t?t-u:null};}
 function validMinutes(v) {
   // Fields carrying remaining time are tentatively interpreted as minute counts.
   // Do not interpret arbitrary REMAIN_PERIOD values as minutes.
@@ -188,8 +190,9 @@ function extractStructuredData(home, goods, fallback) {
     || tickets.find(v=>currentName&&v.shopName===currentName);
   const chosenTicket=currentTicket||tickets[0];
   const chosenRecent=currentRecent||recentStores[0];
-  const inferredMinutes=validMinutes(h.home_shop_user_remain_m)
-    ?? validMinutes(currentRecent?.remainingRaw);
+  // APK renders home_shop_user_remain_m with a KRW ("원") suffix: it is monetary,
+  // NOT remaining study time. Never convert it into minutes.
+  const inferredMinutes=validMinutes(currentRecent?.remainingRaw);
   // Do not report a merely recent/historical store as the currently linked cafe.
   const confirmedStoreName=currentName||(currentNumber?(currentTicket?.shopName||currentRecent?.name||''):'');
   const result=asStatus(fallback,'');
@@ -202,10 +205,20 @@ function extractStructuredData(home, goods, fallback) {
     remainingMinutes:inferredMinutes??result.member.ticket.remainingMinutes,
     totalMinutes:null
   };
-  result.live.currentShop={name:currentName,shopNo:currentNumber};
+  result.live.currentShop={name:currentName,shopNo:currentNumber,floorNo:readable(h.home_floor_no,30)};
+  // These counters power the native app's occupied/total labels.
+  // Individual seats are intentionally not fabricated from aggregate counts.
+  result.live.seatAvailability={
+    personal:seatCapacity(h.home_shop_tot_p,h.home_shop_use_p),
+    group:seatCapacity(h.home_shop_tot_g,h.home_shop_use_g),
+    locker:seatCapacity(h.home_shop_tot_l,h.home_shop_use_l),
+    confirmedShop:!!currentName&&!!currentNumber,
+    fetchedAt:new Date().toISOString()
+  };
+  result.live.entryQrAvailable=typeof h.home_qr_code==='string'&&h.home_qr_code.length>0;
   result.live.recentShops=recentStores;
   result.live.ticketItems=tickets;
-  result.live.homeValues={remainingRaw:readable(h.home_shop_user_remain_m,40),recentCount:recentStores.length,ticketsCount:tickets.length};
+  result.live.homeValues={recentCount:recentStores.length,ticketsCount:tickets.length};
   return result;
 }
 
@@ -349,6 +362,29 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
         if (pathname === '/api/logout' && req.method === 'POST') {
           checkMutation(req, s); s.token = ''; s.name = ''; s.jar.clear(); s.lastDiagnostic = null; s.lastLogin = null;
           return response(res, 200, { ok: true });
+        }
+        // Read the entry QR only when the signed-in user explicitly opens the QR screen.
+        // Never include QR payloads in status, diagnostics, URLs, logs, or persistent storage.
+        if (pathname === '/api/entry-qr' && req.method === 'GET') {
+          if (!s.token) throw createError(401,'로그인 후 입장 QR을 확인할 수 있습니다.');
+          const remote=await upstream(UPSTREAM+'/api/app.do',{
+            method:'POST',
+            headers:{'Content-Type':'application/json',Accept:'application/json'},
+            body:JSON.stringify({cmd:'1100',m_value:s.device,tk:s.token,latitude:'0',longitude:'0'})
+          },s.jar);
+          let qrResponse;
+          try{qrResponse=upstreamPayload(remote.text);}
+          catch{throw createError(502,'공식 앱 홈의 QR 응답을 해석하지 못했습니다.');}
+          if(String(qrResponse.rspcode??'')!=='0000') throw createError(502,'공식 앱 홈 데이터 조회가 실패했습니다.');
+          const qr=qrResponse.home_qr_code;
+          if(typeof qr!=='string'||qr.trim()===''||qr.length>3000)
+            throw createError(404,'현재 계정의 앱 입장 QR이 제공되지 않았습니다.');
+          return response(res,200,{
+            qr,
+            shopName:readable(qrResponse.home_shop_name),
+            qrAvailable:true,
+            use:'현장에서 공식 키오스크 또는 출입 장치가 요구하는 QR 스캐너로 제시'
+          });
         }
         if (pathname === '/api/status' && req.method === 'GET') {
           if (!s.token) throw createError(401, '먼저 본인 계정으로 로그인하세요.');
