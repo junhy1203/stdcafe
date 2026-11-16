@@ -17,5 +17,9 @@ jobs:
         run: |
           node --check server.mjs
           node --check public/app.js
+      - name: Deployment shell syntax
+        run: |
+          bash -n deploy/install.sh
+          bash -n deploy/cloud-shell.sh
       - name: Test backend
         run: node --test tests/server.test.mjs
