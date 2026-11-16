@@ -491,6 +491,60 @@ export function inspectNativeSeatScriptEffects(html){
   return {scriptCount:count,markerCount:allIds.size,patterns:[...groups.values()].slice(0,20)};
 }
 
+
+/** Read-only layout evidence from the official seating HTML.
+ * Only static stylesheet paths and numeric geometry are disclosed.
+ * Never relay native HTML/CSS, inline script text, image bytes or session data.
+ */
+export function inspectNativeRoomLayout(html){
+  if(typeof html!=='string'||html.length>MAX_HTML)return {invalid:true};
+  const stylesheets=[];
+  for(const m of html.matchAll(/<link\b[^>]{0,1000}>/gi)){
+    const a=htmlAttrs(m[0]),p=safePathOnly(a.href);
+    if(p&&/\.css$/i.test(p)&&!stylesheets.includes(p))stylesheets.push(p);
+    if(stylesheets.length>=20)break;
+  }
+  const imageAssetPaths=[];
+  for(const m of html.matchAll(/(?:url\s*\(\s*['"]?|src\s*=\s*['"])(\/[A-Za-z0-9_./-]{1,220}\.(?:png|jpe?g|gif|webp|svg))['"]?\s*\)?/gi)){
+    const p=safePathOnly(m[1]);
+    if(p&&/seat|floor|map|room|chart|layout|plan|background|bg_/i.test(p)
+       &&!imageAssetPaths.includes(p))imageAssetPaths.push(p);
+    if(imageAssetPaths.length>=30)break;
+  }
+  const coords=[],classes={};let seatElements=0,seatElementsWithGeometry=0;
+  const geometry=(src,key)=>{
+    const m=new RegExp('(?:^|;)\\s*'+key+'\\s*:\\s*(-?\\d{1,5}(?:\\.\\d{1,3})?)\\s*(px|%)\\b','i').exec(src);
+    return m?{value:Number(m[1]),unit:m[2]}:null;
+  };
+  for(const tag of html.matchAll(/<(?:div|span|button|a|li|td|section)\b[^>]{0,1200}>/gi)){
+    const attrs=htmlAttrs(tag[0]),cs=(attrs.class||'').split(/\s+/).filter(x=>/^[A-Za-z][A-Za-z0-9_-]{0,45}$/.test(x));
+    if(!cs.some(x=>/^(?:seat|seatNo_\d+|info-seat|wrap-seat|tab-floor|floorNo_\d+|type0\d)$/i.test(x)))continue;
+    if(cs.some(x=>/^seat$|^seatNo_\d+$/i.test(x)))seatElements++;
+    for(const c of cs)classes[c]=(classes[c]||0)+1;
+    const style=attrs.style||'';
+    const x=geometry(style,'left'),y=geometry(style,'top'),w=geometry(style,'width'),h=geometry(style,'height');
+    if(x&&y)seatElementsWithGeometry++;
+    if(coords.length<36&&(x||y||w||h)){
+      coords.push({classes:cs.filter(x=>/seat|room|floor|type0/i.test(x)).slice(0,5),
+        x,y,width:w,height:h});
+    }
+  }
+  const styleTags=[...html.matchAll(/<style\b[^>]*>([\s\S]{0,80000}?)<\/style>/gi)];
+  const cssText=styleTags.map(m=>m[1]).join('\n');
+  const rules={
+    inlineStyleTags:styleTags.length,
+    inlineStyleCharacters:cssText.length,
+    containsBackgroundAsset:/background(?:-image)?\s*:[^;}]*url\s*\(/i.test(cssText),
+    seatSelectorCount:[...cssText.matchAll(/\.(?:seat|seatNo|wrap-seat|type0\d)\b/gi)].length,
+    absolutePositions:[...cssText.matchAll(/position\s*:\s*absolute/gi)].length
+  };
+  return {
+    stylesheets,inlineCss:rules,seatElements,seatElementsWithGeometry,
+    classCounts:Object.fromEntries(Object.entries(classes).slice(0,30)),
+    examplesWithGeometry:coords,imageAssetPaths
+  };
+}
+
 export function extractNativeSeatMarkers(html){
   if(typeof html!=='string'||html.length>MAX_HTML)return {seats:[],evidence:0};
   const found=new Map();
@@ -598,6 +652,7 @@ export function parseSeatLayout(html,source='enter'){
       nativeMarkers:{count:native.evidence,shown:native.seats.length,
         statusUnverified:native.seats.every(s=>s.status==='unknown'),ids:native.seats.map(s=>s.id).slice(0,100),
         effects:inspectNativeSeatScriptEffects(html)},
+      nativeLayout:inspectNativeRoomLayout(html),
       scriptPaths:scriptPaths(html),
       candidateApiPaths:findSeatApiPaths(html),
       requestHints:inspectSeatRequests(html),
