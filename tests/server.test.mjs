@@ -905,3 +905,17 @@ test('failed native seat lookup includes redacted HTML and chart response forens
     for(const value of [secret,'PRIVATE_AUTH_TOKEN','SECRET_PERSON','SECRET_CAFE'])assert.ok(!diagRaw.includes(value),'leaked '+value);
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+
+test('iPad diagnostic JSON download uses only redacted report data',async()=>{
+  const fs=await import('node:fs/promises');
+  const html=await fs.readFile(new URL('../public/index.html',import.meta.url),'utf8');
+  const app=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
+  const css=await fs.readFile(new URL('../public/style.css',import.meta.url),'utf8');
+  assert.ok(html.includes('id="seat-diagnostic-save"'));
+  assert.ok(app.includes("'seat-diagnostic-save'"));
+  assert.ok(app.includes('JSON.stringify(safeSeatDiagnostic(data),null,2)'));
+  assert.ok(app.includes('stdcafe-seat-diagnostics-v14.json'));
+  assert.ok(app.includes('URL.createObjectURL(file)'));
+  assert.ok(css.includes('#seat-diagnostic-save'));
+});
