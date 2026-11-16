@@ -914,8 +914,10 @@ test('iPad diagnostic JSON download uses only redacted report data',async()=>{
   const css=await fs.readFile(new URL('../public/style.css',import.meta.url),'utf8');
   assert.ok(html.includes('id="seat-diagnostic-save"'));
   assert.ok(app.includes("'seat-diagnostic-save'"));
-  assert.ok(app.includes('JSON.stringify(safeSeatDiagnostic(data),null,2)'));
-  assert.ok(app.includes('stdcafe-seat-diagnostics-v14.json'));
+  assert.ok(app.includes("zones[floor]={...safeSeatDiagnostic(current)"));
+  assert.ok(app.includes('stdcafe-both-room-diagnostics-v16.json'));
+  assert.ok(app.includes("'/api/seat-layout?floor='+floor"));
+  assert.ok(app.includes("for(const floor of ['1','2'])"));
   assert.ok(app.includes('URL.createObjectURL(file)'));
   assert.ok(css.includes('#seat-diagnostic-save'));
 });
