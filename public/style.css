@@ -80,5 +80,5 @@
 /* Copyable redacted diagnostic text for iPad Safari (including non-HTTPS local VPN). */
 .seat-diagnostic-export{display:block;width:100%;min-height:160px;margin-top:16px;padding:12px;border:1px solid #dddbea;background:#f9f8ff;color:#414156;border-radius:10px;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;white-space:pre;resize:vertical}
 .seat-diagnostic-export[hidden]{display:none}
-#seat-diagnostic-copy{cursor:pointer;flex-shrink:0;border:1px solid #dddbea;background:#f5f2ff;color:#5744b6;border-radius:9px;padding:10px 14px;font-size:12px;font-weight:750}
-#seat-diagnostic-copy:disabled{opacity:.5;cursor:wait}
+#seat-diagnostic-copy,#seat-diagnostic-save{cursor:pointer;flex-shrink:0;border:1px solid #dddbea;background:#f5f2ff;color:#5744b6;border-radius:9px;padding:10px 14px;font-size:12px;font-weight:750}
+#seat-diagnostic-copy:disabled,#seat-diagnostic-save:disabled{opacity:.5;cursor:wait}
