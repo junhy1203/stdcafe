@@ -85,6 +85,28 @@
 .room-info{font-size:12px;color:#727587;margin:0 0 18px;line-height:1.6}
 @media(max-width:740px){.room-tabs{width:100%}.room-tabs .room-tab{flex:1;min-width:0;padding:11px 8px;font-size:12px}}
 
+
+/* Screenshot-based room map. Does not invent occupancy, seat positions or
+   admission eligibility. The room sheet scrolls horizontally on small screens. */
+.seat-grid.full.reference-floor-plan{display:block;min-width:0;max-width:100%;overflow-x:auto;overflow-y:visible;padding:12px 10px 0;border:1px solid #e5e7ef;background:#f9fafc;border-radius:16px;gap:0}
+.reference-floor-viewport{position:relative;flex:none;background:#f6f6f6;box-sizing:border-box;margin:0 auto 0 0;isolation:isolate}
+.reference-floor-viewport .floor-zone{position:absolute;z-index:0;border-radius:3px;border:1px solid #ddccab;box-sizing:border-box}
+.floor-zone-desk{background:#f8dfad}
+.floor-zone-walkway{background:#fbe8ec;border-color:#f3dce2!important}
+.floor-zone-booth{background:#dad0ee;border-top:3px solid #3c3550!important}
+.floor-zone-group{background:#fff2ea}
+.floor-zone-studio{background:#fff;border:2px solid #82838b!important;border-radius:17px!important}
+.reference-floor-viewport .floor-label{position:absolute;z-index:1;max-width:190px;background:#f3f2f8;color:#20212a;border:2px solid #aaa4ae;border-radius:5px;box-shadow:1px 3px 4px #0001;font-size:13px;font-weight:750;padding:6px 8px;white-space:nowrap}
+.reference-floor-viewport .floor-label-vertical{writing-mode:vertical-rl;max-height:125px;white-space:normal;padding:6px 4px}
+.seat-grid.full.reference-floor-plan .seat.floor-seat{position:absolute;z-index:2;display:flex;align-items:center;justify-content:center;width:57px;height:39px;min-width:0;min-height:0;padding:0;margin:0;font-size:13px;font-weight:650;border-radius:0;box-shadow:inset 0 -2px 0 #c6d4c6;border:1.5px solid #333b37;background:#fff;color:#222}
+.seat-grid.full.reference-floor-plan .seat.floor-seat.unknown{background:#efeff0;border:1.5px solid #5a5e64;color:#30343a;box-shadow:inset 0 -2px 0 #aebfae}
+.seat-grid.full.reference-floor-plan .seat.floor-seat.available{background:#bfeac9;border:2px solid #318e51;color:#17482a}
+.seat-grid.full.reference-floor-plan .seat.floor-seat.occupied{background:#9da0a6;border:2px solid #424650;color:#111}
+.seat-grid.full.reference-floor-plan .seat.floor-seat.disabled{background:#f3cbd0;border:2px solid #bc4f5a;color:#542128}
+.seat-grid.full.reference-floor-plan .seat.floor-seat.selected{outline:3px solid #6041d4;outline-offset:1px;z-index:4}
+.reference-floor-plan .floor-reference-caption{color:#6f7280;line-height:1.55;margin:12px 4px 15px;font-size:12px;max-width:900px}
+@media(max-width:740px){.seat-grid.full.reference-floor-plan{padding:8px 5px 0}.reference-floor-plan .floor-reference-caption{padding:0 8px}}
+
 /* Copyable redacted diagnostic text for iPad Safari (including non-HTTPS local VPN). */
 .seat-diagnostic-export{display:block;width:100%;min-height:160px;margin-top:16px;padding:12px;border:1px solid #dddbea;background:#f9f8ff;color:#414156;border-radius:10px;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;white-space:pre;resize:vertical}
 .seat-diagnostic-export[hidden]{display:none}
