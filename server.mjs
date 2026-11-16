@@ -477,7 +477,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                 redirects:remote.redirects,finalPath:remote.finalPath});
               if(parsed.seats.length){
                 s.lastSeatDiagnostic={
-                  checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
+                  checkedAt:new Date(now()).toISOString(),shopIdentified:Boolean(readable(home.home_shop_name)),
                   floorNo,source:name,summary:parsed.summary,
                   detectedScripts:parsed.inspect.scriptPaths
                 };
@@ -577,7 +577,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               });
               if(result.seats.length){
                 s.lastSeatDiagnostic={
-                  checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
+                  checkedAt:new Date(now()).toISOString(),shopIdentified:Boolean(readable(home.home_shop_name)),
                   floorNo,source:'app-seat-api',summary:result.summary,
                   detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,inspected
                 };
@@ -597,7 +597,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             }
           }
           s.lastSeatDiagnostic={
-            checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
+            checkedAt:new Date(now()).toISOString(),shopIdentified:Boolean(readable(home.home_shop_name)),
             floorNo,source:null,detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,
             inspected,probes,
             attempts:attempts.map(a=>({
