@@ -1027,3 +1027,30 @@ test('server returns partial marker-only seats when upstream chart has no occupa
     assert.equal(meta.attempts.find(x=>x.name==='enter').nativeSeatMarkers.count,3);
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+
+test('only directly applied known classes yield verified seat status',async()=>{
+  const {parseSeatLayout,inspectNativeSeatScriptEffects}=await import('../seat-map.mjs');
+  const page='<html><div class="wrap-seat"></div>'+
+    '<script>$("#seatNo_19").addClass("occupied");</script>'+
+    '<script>$("#seatNo_4").addClass("available");</script>'+
+    '<script>$("#seatNo_23").addClass("C");</script>'+
+    '<script>$("#seatNo_65").css("background-color","#ababab");</script>'+
+    '<script>$("#seatNo_67").addClass("on");</script></html>';
+  const parsed=parseSeatLayout(page,'enter');
+  assert.equal(parsed.summary.count,5);
+  assert.equal(parsed.summary.occupied,1);
+  assert.equal(parsed.summary.available,1);
+  assert.equal(parsed.summary.unknown,3);
+  assert.equal(parsed.seats.find(x=>x.id==='19').status,'occupied');
+  assert.equal(parsed.seats.find(x=>x.id==='4').status,'available');
+  assert.equal(parsed.seats.find(x=>x.id==='23').status,'unknown');
+  assert.equal(parsed.seats.find(x=>x.id==='65').status,'unknown');
+  const effects=inspectNativeSeatScriptEffects(page);
+  assert.equal(effects.markerCount,5);
+  assert.equal(effects.scriptCount,5);
+  assert.ok(effects.patterns.some(x=>x.classes.includes('occupied')));
+  assert.ok(effects.patterns.some(x=>x.cssProps.includes('background-color')));
+  const report=JSON.stringify(effects);
+  assert.ok(!report.includes('<script>'));
+});
