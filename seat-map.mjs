@@ -128,6 +128,9 @@ function collectObjects(input,out,depth=0){
   for(const [key,value] of Object.entries(input)){
     if(/password|token|secret|private|user|account|name/i.test(key)&&!/seat|room|chart/i.test(key))continue;
     if(value&&typeof value==='object')collectObjects(value,out,depth+1);
+    else if(typeof value==='string'&&value.length<200000&&/^[\s]*[\[{]/.test(value)){
+      try{collectObjects(JSON.parse(value),out,depth+1)}catch{}
+    }
   }
 }
 function extractHtmlSeatRecords(html){
@@ -181,5 +184,31 @@ export function parseSeatLayout(html,source='enter'){
         hasJsonSeatList:/seatList|seatData|seatArr|seatMap|seat_list/i.test(html)
       }
     }
+  };
+}
+
+
+// Parse actual JSON returned by a read-only seat-status endpoint, not static JS.
+// Only seat records with explicit IDs are ever returned.
+export function parseSeatResponse(raw,source='api'){
+  if(typeof raw!=='string'||raw.length>MAX_HTML)throw new Error('좌석 응답 크기를 확인할 수 없습니다.');
+  let json;
+  try{json=JSON.parse(raw)}catch{return parseSeatLayout(raw,source)}
+  const rows=[];collectObjects(json,rows);
+  const byId=new Map(),ambiguous=new Set();
+  let conflicts=0;
+  for(const seat of rows){
+    if(ambiguous.has(seat.id))continue;
+    const old=byId.get(seat.id);
+    if(old && old.status!==seat.status){byId.delete(seat.id);ambiguous.add(seat.id);conflicts++;continue}
+    if(!old)byId.set(seat.id,seat);
+  }
+  const seats=[...byId.values()].slice(0,MAX_SEATS);
+  const count=status=>seats.filter(s=>s.status===status).length;
+  const positions=seats.filter(s=>s.x!==null&&s.y!==null).length;
+  return {
+    source,seats,actualPositions:seats.length>2&&positions===seats.length,
+    summary:{count:seats.length,available:count('available'),occupied:count('occupied'),unknown:count('unknown'),coordinates:positions,conflicts},
+    inspect:{htmlCharacters:raw.length,scriptPaths:[],candidateApiPaths:[],hints:{hasSeatKeyword:rows.length>0,hasWebviewData:false,hasJsonSeatList:true}}
   };
 }
