@@ -445,6 +445,52 @@ function collectObjects(input,out,depth=0,seatContext=false){
  * of vacancy, occupancy, or physical coordinates. Never infer status or
  * total floor capacity from the number of markers.
  */
+
+/** Safe summary of seat-specific short script operations. No script text,
+ * form values, credentials, raw page content or user data are returned. */
+export function inspectNativeSeatScriptEffects(html){
+  if(typeof html!=='string'||html.length>MAX_HTML)return {scriptCount:0,markerCount:0,patterns:[]};
+  const groups=new Map(),allIds=new Set();
+  let count=0;
+  for(const m of html.matchAll(/<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]{0,150000}?)<\/script>/gi)){
+    const code=m[1],ids=[...new Set([...code.matchAll(/\bseatNo_([A-Za-z]{0,3}\d{1,4}[A-Za-z]?)\b/gi)]
+      .map(x=>x[1]))];
+    if(!ids.length)continue;
+    count++;
+    ids.forEach(id=>allIds.add(id));
+    const operations={};
+    for(const [label,regex] of Object.entries({
+      addClass:/\.addClass\s*\(/gi,removeClass:/\.removeClass\s*\(/gi,
+      toggleClass:/\.toggleClass\s*\(/gi,css:/\.css\s*\(/gi,
+      attr:/\.attr\s*\(/gi,prop:/\.prop\s*\(/gi,
+      text:/\.text\s*\(/gi,html:/\.html\s*\(/gi,
+      hide:/\.hide\s*\(/gi,show:/\.show\s*\(/gi,
+      setAttribute:/\.setAttribute\s*\(/gi,style:/\.style\./gi
+    })){
+      const number=[...code.matchAll(regex)].length;
+      if(number)operations[label]=number;
+    }
+    const classes=[...new Set([...code.matchAll(/\.(?:addClass|removeClass|toggleClass)\s*\(\s*["']([A-Za-z0-9_-]{1,35})["']/gi)]
+      .map(x=>x[1]).filter(x=>!/token|password|secret|user|account|cookie|auth/i.test(x)))].slice(0,12);
+    const cssProps=[...new Set([...code.matchAll(/\.css\s*\(\s*["']([A-Za-z][A-Za-z-]{1,40})["']/gi)]
+      .map(x=>x[1]))].slice(0,12);
+    const colors=[...new Set([...code.matchAll(/#[0-9A-Fa-f]{3,8}\b/g)].map(x=>x[0]))].slice(0,8);
+    const statusLiterals=[...new Set([...code.matchAll(/["'](available|occupied|using|inuse|empty|vacant|free|disabled|used|unused|busy|blocked|unavailable|open)["']/gi)]
+      .map(x=>x[1].toLowerCase()))].slice(0,12);
+    const pattern=JSON.stringify({operations,classes,cssProps,colors,statusLiterals});
+    const row=groups.get(pattern)||{
+      scriptCount:0,occurrences:0,exampleSeatIds:[],operations,classes,cssProps,colors,statusLiterals,
+      scriptLengthRange:[code.length,code.length]
+    };
+    row.scriptCount++;row.occurrences+=ids.length;
+    row.scriptLengthRange=[Math.min(row.scriptLengthRange[0],code.length),Math.max(row.scriptLengthRange[1],code.length)];
+    row.exampleSeatIds.push(...ids.filter(id=>row.exampleSeatIds.length<6));
+    groups.set(pattern,row);
+    if(count>=150)break;
+  }
+  return {scriptCount:count,markerCount:allIds.size,patterns:[...groups.values()].slice(0,20)};
+}
+
 export function extractNativeSeatMarkers(html){
   if(typeof html!=='string'||html.length>MAX_HTML)return {seats:[],evidence:0};
   const found=new Map();
@@ -456,6 +502,15 @@ export function extractNativeSeatMarkers(html){
     if(!ids.length)continue;
     for(const id of ids){
       if(!found.has(id))found.set(id,{id,status:'unknown',x:null,y:null});
+    }
+
+    // Only accept an explicitly meaningful class directly applied to
+    // the matching seat selector; undocumented "C", "on" or colors stay unknown.
+    for(const call of code.matchAll(/\$\(\s*["'](?:[#.]?)seatNo_([A-Za-z]{0,3}\d{1,4}[A-Za-z]?)["']\s*\)\s*\.\s*addClass\s*\(\s*["']([A-Za-z0-9_-]{1,40})["']\s*\)/gi)){
+      const seat=found.get(call[1]);
+      if(!seat)continue;
+      const verified=occupancy(call[2],'class',call[2]);
+      if(verified&&['available','occupied','disabled'].includes(verified))seat.status=verified;
     }
     if(found.size>MAX_SEATS)break;
   }
@@ -541,7 +596,8 @@ export function parseSeatLayout(html,source='enter'){
     inspect:{
       htmlCharacters:html.length,
       nativeMarkers:{count:native.evidence,shown:native.seats.length,
-        statusUnverified:true,ids:native.seats.map(s=>s.id).slice(0,100)},
+        statusUnverified:native.seats.every(s=>s.status==='unknown'),ids:native.seats.map(s=>s.id).slice(0,100),
+        effects:inspectNativeSeatScriptEffects(html)},
       scriptPaths:scriptPaths(html),
       candidateApiPaths:findSeatApiPaths(html),
       requestHints:inspectSeatRequests(html),
