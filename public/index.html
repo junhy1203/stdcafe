@@ -8,8 +8,8 @@
   <meta name="robots" content="noindex,nofollow" />
   <title>SSAMCAFE Web — 개인용 조회 클라이언트</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="style.css?v=20261116-dual-room-view-v16" />
-  <script defer src="app.js?v=20261116-dual-room-view-v16"></script>
+  <link rel="stylesheet" href="style.css?v=20261116-reference-floorplan-v17" />
+  <script defer src="app.js?v=20261116-reference-floorplan-v17"></script>
 </head>
 <body>
   <div class="shell">
@@ -35,8 +35,8 @@
             <article class="overview-card"><div class="card-top"><span>이용 가능한 좌석</span><span class="light-tag">AVAILABLE</span></div><div class="big-value" id="available-count">—</div><div class="muted" id="available-detail">좌석 정보 없음</div><div class="available-legend"><span class="dot available"></span>이용 가능 <span class="dot occupied"></span>사용 중</div></article>
           </div>
           <section class="entry-shortcut panel">
-            <div><h2>현장 QR 입장</h2><p>쌤카페 앱 홈에서 발급한 본인 QR을 표시합니다. 매장 스캐너에 QR을 제시해야 실제 입실됩니다.</p></div>
-            <button type="button" id="entry-open-home" class="primary">입장 QR 표시</button>
+            <div><h2>현장 QR 입실·퇴실</h2><p>공식 쌤카페 앱에서 발급한 본인 QR을 표시합니다. 입실·퇴실 완료는 매장 스캐너 또는 공식 앱에서 확인해야 합니다.</p></div>
+            <div class="access-actions"><button type="button" id="entry-open-home" class="primary">입실 QR</button><button type="button" id="exit-open-home" class="secondary">퇴실 QR</button></div>
           </section>
           <div class="section-grid"><section class="panel panel-map"><div class="panel-title"><div><h2>좌석 현황</h2><p id="map-summary">매장 좌석의 이용 상태를 확인하세요.</p></div><button class="text-action" data-view="seats">전체보기 <span>→</span></button></div><div id="seat-map-home" class="seat-grid" aria-label="좌석 현황"></div><div class="map-key"><span><i class="legend-square available"></i>이용 가능</span><span><i class="legend-square occupied"></i>사용 중</span><span><i class="legend-square my"></i>내 좌석</span><span><i class="legend-square disabled"></i>사용 불가</span><span><i class="legend-square unknown"></i>상태 미확인</span></div></section><section class="panel panel-store"><div class="panel-title"><div><h2>이용 중인 매장</h2><p>내 매장 정보</p></div></div><div class="store-art"><div class="art-circle one"></div><div class="art-circle two"></div><span>YOUR SPACE</span></div><div class="store-name" id="store-name">매장 정보 없음</div><div class="store-address" id="store-address">연결 후 확인할 수 있습니다.</div><div class="store-divider"></div><div class="store-row"><span>데이터 갱신</span><strong id="last-update">—</strong></div><a class="official-link" href="https://m.ssamcafe.com/mobile/storeList.do" target="_blank" rel="noopener noreferrer">공식 매장 목록 열기 <span>↗</span></a></section></div>
           <section class="panel live-panel" id="structured-home-panel" hidden>
@@ -78,7 +78,8 @@
           <div id="availability-counters" class="availability-counters" role="status"><p>로그인 후 매장 현황을 조회해 주세요.</p></div>
           <div class="availability-actions">
             <button type="button" id="availability-refresh" class="secondary">빈 좌석 새로고침</button>
-            <button type="button" id="entry-open-seats" class="primary">현장 입장 QR 표시</button>
+            <button type="button" id="entry-open-seats" class="primary">입실 QR 표시</button>
+            <button type="button" id="exit-open-seats" class="secondary">퇴실 QR 표시</button>
           </div>
           <p class="input-hint">좌석이 비어 있어도 이용권 조건에 따라 입장할 수 없을 수 있습니다. 개별 좌석 선택/확정 API는 검증 전입니다.</p>
         </section>
@@ -94,19 +95,19 @@
 </div>
 <p class="room-info">이용권 종류와 관계없이 각 구역의 서버 제공 좌석번호를 조회합니다. 실제 이용·입실 가능 여부는 매장 규정에 따릅니다.</p>
 <div id="seat-map-full" class="seat-grid full" aria-label="개별 좌석 배치도"></div><textarea id="seat-diagnostic-export" class="seat-diagnostic-export" readonly hidden aria-label="민감정보를 제외한 좌석 진단 결과"></textarea><div class="map-key"><span><i class="legend-square available"></i>이용 가능</span><span><i class="legend-square occupied"></i>사용 중</span><span><i class="legend-square my"></i>내 좌석</span><span><i class="legend-square disabled"></i>사용 불가</span><span><i class="legend-square unknown"></i>상태 미확인</span></div><div id="seat-detail" class="seat-detail" role="status">좌석을 선택하면 상세 상태를 확인할 수 있어요.</div></section><section id="live-seat-panel" class="panel live-panel" hidden><h2>공식 좌석 조회 화면의 데이터</h2><div id="live-seat-source" class="source-list"></div></section></section>
-        <section id="view-tickets" class="view"><div class="page-heading"><div><div class="eyebrow">MY PASS</div><h1>이용권 정보</h1><p>남은 이용시간과 좌석 정보를 확인하세요.</p></div></div><div class="ticket-layout"><section class="panel pass-card"><div class="pass-label">ACTIVE PASS</div><h2 id="pass-title">—</h2><div class="pass-time" id="pass-left">—</div><p>남은 이용시간</p><div class="pass-progress"><div id="pass-bar"></div></div><div class="pass-footer"><span>전체 이용시간</span><strong id="pass-total">—</strong></div></section><section class="panel pass-details"><h2>이용 정보</h2><dl><div><dt>매장</dt><dd id="pass-store">—</dd></div><div><dt>현재 좌석</dt><dd id="pass-seat">—</dd></div><div><dt>데이터 시각</dt><dd id="pass-updated">—</dd></div><div><dt>데이터 출처</dt><dd id="pass-source">—</dd></div></dl><div class="info-note">서버 조회만 지원하며 결제·예약·입퇴실 변경 요청은 하지 않습니다.</div></section></div><section id="live-ticket-panel" class="panel live-panel" hidden><h2>공식 이용권 조회 화면의 데이터</h2><div id="live-ticket-source" class="source-list"></div></section></section>
+        <section id="view-tickets" class="view"><div class="page-heading"><div><div class="eyebrow">MY PASS</div><h1>이용권 정보</h1><p>남은 이용시간과 좌석 정보를 확인하세요.</p></div></div><div class="ticket-layout"><section class="panel pass-card"><div class="pass-label">ACTIVE PASS</div><h2 id="pass-title">—</h2><div class="pass-time" id="pass-left">—</div><p>남은 이용시간</p><div class="pass-progress"><div id="pass-bar"></div></div><div class="pass-footer"><span>전체 이용시간</span><strong id="pass-total">—</strong></div></section><section class="panel pass-details"><h2>이용 정보</h2><dl><div><dt>매장</dt><dd id="pass-store">—</dd></div><div><dt>현재 좌석</dt><dd id="pass-seat">—</dd></div><div><dt>데이터 시각</dt><dd id="pass-updated">—</dd></div><div><dt>데이터 출처</dt><dd id="pass-source">—</dd></div></dl><div class="info-note">입·퇴실 QR을 통해 현장 스캐너를 이용할 수 있습니다. 온라인 퇴실 처리 API는 검증 전이므로 서버에 임의의 퇴실 요청을 보내지 않습니다.</div></section></div><section id="live-ticket-panel" class="panel live-panel" hidden><h2>공식 이용권 조회 화면의 데이터</h2><div id="live-ticket-source" class="source-list"></div></section></section>
       </div>
     </main>
   </div>
   <div id="modal-overlay" class="modal-overlay" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-heading"><div class="modal-header"><div><div class="eyebrow">DATA SOURCE</div><h2 id="modal-heading">데이터 연결</h2></div><button class="close-btn" id="close-modal" aria-label="닫기">×</button></div><p class="modal-desc">개인용 서버 브리지를 통해 쌤카페 계정으로 로그인할 수 있습니다. 로그인 정보는 실행 중인 본인 서버에서 처리하며, 인증 토큰은 브라우저로 보내지 않습니다. 현재 서버 동작은 실제 계정으로 검증되지 않았습니다.</p><div class="form-section login-section"><h3>쌤카페 서버 연동</h3><div id="bridge-status" class="bridge-status" role="status">서버 연결 확인 중…</div><form id="bridge-login-form" autocomplete="on"><label for="login-id">쌤카페 앱 로그인 아이디</label><input id="login-id" type="text" maxlength="120" autocomplete="username" placeholder="회원가입 때 설정한 로그인 ID" required /><label for="login-password">비밀번호</label><input id="login-password" type="password" autocomplete="current-password" placeholder="본인 서버에만 입력" required /><details class="login-advanced"><summary>고급 설정 — 본인 기기 식별값(선택)</summary><p class="input-hint">기본값은 서버가 생성하는 임시 기기 ID입니다. 서비스가 기기 등록을 요구하면 앱에서 사용하는 본인 기기 ID가 필요할 수 있습니다.</p><label for="login-device">본인 기기 ID</label><input id="login-device" type="text" maxlength="128" autocomplete="off" /></details><div class="bridge-actions"><button id="bridge-login" class="primary" type="submit">로그인 후 실제 데이터 조회</button><button id="bridge-logout" class="secondary" type="button" hidden>로그아웃</button></div></form><p id="bridge-error" class="error" role="alert" hidden></p><p class="input-hint">본인 계정과 본인 기기에서만 사용하세요. WireGuard VPN에 연결된 본인 기기에서만 사용하세요. VPN 외부에 공개하지 마세요.</p></div><hr class="form-divider" /><div class="form-section"><label for="data-file">JSON 파일 가져오기 <small>권장 · 브라우저 안에서만 처리</small></label><input id="data-file" type="file" accept="application/json,.json" /><p class="input-hint">아래 제공하는 sample-data.json을 불러와서 데이터 연결 방식을 테스트할 수 있습니다.</p></div><div class="form-section"><label for="endpoint-url">사용자 소유 읽기 전용 API 주소 <small>선택 사항</small></label><div class="endpoint-row"><input id="endpoint-url" type="url" placeholder="https://내-도메인.example/api/ssam-status" autocomplete="off" spellcheck="false" /><button id="fetch-endpoint">불러오기</button></div><p class="input-hint">쌤카페 공식 서버 주소를 직접 입력해도 CORS·인증 제한 때문에 동작하지 않을 수 있습니다. 비밀번호·인증 토큰을 URL에 넣지 마세요.</p></div><p id="modal-error" class="error" role="alert" hidden></p><div class="modal-footer"><button id="restore-demo" class="secondary">예시 데이터로 돌아가기</button><button id="dismiss-modal" class="primary">확인</button></div></section></div>
   <div id="entry-overlay" class="modal-overlay" hidden>
     <section class="modal qr-entry-modal" role="dialog" aria-modal="true" aria-labelledby="entry-title">
-      <div class="modal-header"><div><div class="eyebrow">SSAMCAFE ENTRY</div><h2 id="entry-title">현장 입장 QR</h2></div>
+      <div class="modal-header"><div><div class="eyebrow">SSAMCAFE ACCESS</div><h2 id="entry-title">현장 입실·퇴실 QR</h2></div>
         <button id="entry-close" type="button" class="close-btn" aria-label="입장 QR 닫기">×</button></div>
       <p id="entry-status" role="status" class="modal-desc">공식 앱 홈에서 입장 QR을 불러옵니다.</p>
       <div id="entry-qr-canvas" class="entry-qr-canvas" aria-label="본인 입장 QR 표시 영역"></div>
-      <p class="input-hint">이 QR은 쌤카페 앱에서 내려받은 본인 계정용 코드입니다. 매장의 QR 스캐너에 제시해야 실제 입실됩니다. 이 웹사이트는 입실 완료를 임의로 처리하지 않습니다.</p>
-      <div class="bridge-actions"><button id="entry-reload" type="button" class="primary">QR 새로고침</button><button id="entry-dismiss" type="button" class="secondary">닫기</button></div>
+      <p class="input-hint" id="access-explanation">공식 앱에서 내려받은 본인 계정 QR입니다. 실제 입·퇴실은 현장 스캐너 또는 공식 앱에서 처리합니다. 웹사이트는 성공 여부를 임의로 변경하지 않습니다.</p>
+      <div class="bridge-actions"><button id="entry-reload" type="button" class="primary">QR 새로고침</button><button id="access-verify" type="button" class="secondary">입·퇴실 상태 새로고침</button><button id="entry-dismiss" type="button" class="secondary">닫기</button></div>
     </section>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
