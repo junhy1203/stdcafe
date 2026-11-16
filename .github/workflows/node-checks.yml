@@ -16,6 +16,7 @@ jobs:
       - name: JavaScript syntax
         run: |
           node --check server.mjs
+          node --check seat-map.mjs
           node --check public/app.js
       - name: Deployment shell syntax
         run: |
