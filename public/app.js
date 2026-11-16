@@ -28,6 +28,7 @@ let seatLayoutMeta = null;
 let latestAccessState = null;
 let selectedSeatZone = '1';
 let seatLayoutRequested = false;
+let seatLayoutGeneration = 0;
 const $ = id => document.getElementById(id);
 let toastTimer;
 function toast(message) {
@@ -691,11 +692,14 @@ async function loadSeatLayout(force=false){
   }
   if(seatLayoutRequested&&!force)return true;
   const btn=$('seat-layout-refresh');
+  const requestZone=selectedSeatZone;
+  const generation=++seatLayoutGeneration;
   btn.disabled=true;
-  setText('seat-layout-status','쌤카페 앱의 실제 좌석 선택 화면을 조회하고 있습니다…');
+  setText('seat-layout-status','선택한 구역의 서버 좌석 정보를 조회하고 있습니다…');
   seatLayoutRequested=true;
   try{
-    const payload=await requestJson('/api/seat-layout?floor='+encodeURIComponent(selectedSeatZone));
+    const payload=await requestJson('/api/seat-layout?floor='+encodeURIComponent(requestZone));
+    if(generation!==seatLayoutGeneration)return false;
     if(!payload.ok||!Array.isArray(payload.seats)||payload.seats.length===0){
       seatLayoutMeta={actualPositions:false,floorNo:payload.floorNo||''};
       state.data=normalize({...state.data,seats:[]});render();
@@ -720,10 +724,13 @@ async function loadSeatLayout(force=false){
         (payload.actualPositions?' · 서버 제공 좌표로 실제 배치':' · 위치 정보가 없어 목록형 그림으로 표시'));
     return true;
   }catch(err){
+    if(generation!==seatLayoutGeneration)return false;
     seatLayoutRequested=false;
     setText('seat-layout-status','좌석별 화면 조회 실패: '+err.message);
     return false;
-  }finally{btn.disabled=false;}
+  }finally{
+    if(generation===seatLayoutGeneration)btn.disabled=false;
+  }
 }
 $('seat-layout-refresh').addEventListener('click',()=>loadSeatLayout(true));
 for(const tab of document.querySelectorAll('[data-seat-zone]')){
