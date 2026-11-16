@@ -1066,7 +1066,7 @@ test('both native seat room tabs can be inspected regardless of pass type',async
   const js=await (await import('node:fs/promises')).readFile(new URL('../public/app.js',import.meta.url),'utf8');
   assert.ok(html.includes('data-seat-zone="1"'));
   assert.ok(html.includes('data-seat-zone="2"'));
-  assert.ok(js.includes("'/api/seat-layout?floor='+encodeURIComponent(selectedSeatZone)"));
+  assert.ok(js.includes("'/api/seat-layout?floor='+encodeURIComponent(requestZone)"));
   assert.ok(!js.includes('passType===selectedSeatZone'));
 });
 test('API accepts explicitly chosen seat zone independently of home floor',async()=>{
