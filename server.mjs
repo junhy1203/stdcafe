@@ -14,7 +14,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
 const NATIVE_WEBVIEW_UA='Mozilla/5.0 (Linux; Android 13; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/118.0.0.0 Mobile Safari/537.36';
-const APP_VERSION = '2026-11-16-dual-room-view-v16';
+const APP_VERSION = '2026-11-16-reference-floorplan-v17';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -699,7 +699,8 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             qr,
             shopName:readable(qrResponse.home_shop_name),
             qrAvailable:true,
-            use:'현장에서 공식 키오스크 또는 출입 장치가 요구하는 QR 스캐너로 제시'
+            use:'공식 앱 홈 QR입니다. 현장 스캐너에서 입·퇴실에 사용할 수 있는지는 매장 운영 방식에 따라 직접 확인해야 합니다.',
+            exitQrVerified:false
           });
         }
         if (pathname === '/api/status' && req.method === 'GET') {
