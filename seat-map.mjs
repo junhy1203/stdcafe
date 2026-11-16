@@ -48,7 +48,7 @@ function seatFromObject(o){
   if(!o||typeof o!=='object'||Array.isArray(o))return null;
   const [rawId,key]=get(o,SEAT_KEYS);
   let id=safeString(rawId,40);
-  if(key==='no' && !('seat' in JSON.stringify(Object.keys(o)).toLowerCase()))return null;
+  if(key==='no' && !Object.keys(o).some(k=>/seat|좌석/i.test(k)))return null;
   if(!/^[\p{L}\p{N}_\- ]{1,30}$/u.test(id))return null;
   const [rawStatus,stateKey]=get(o,STATUS_KEYS);
   const status=occupancy(rawStatus,stateKey);
@@ -134,11 +134,12 @@ function scriptPaths(html){
 }
 export function parseSeatLayout(html,source='enter'){
   if(typeof html!=='string'||html.length>MAX_HTML)throw new Error('좌석 페이지 크기를 확인할 수 없습니다.');
-  const rows=extractHtmlSeatRecords(html),byId=new Map();
+  const rows=extractHtmlSeatRecords(html),byId=new Map(),ambiguous=new Set();
   let conflict=0;
   for(const seat of rows){
+    if(ambiguous.has(seat.id))continue;
     const old=byId.get(seat.id);
-    if(old&&old.status!==seat.status){conflict++;byId.delete(seat.id);continue;}
+    if(old&&old.status!==seat.status){conflict++;byId.delete(seat.id);ambiguous.add(seat.id);continue;}
     if(!old)byId.set(seat.id,seat);
   }
   const seats=[...byId.values()].slice(0,MAX_SEATS);
