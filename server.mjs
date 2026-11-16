@@ -244,6 +244,13 @@ function extractStructuredData(home, goods, fallback) {
     confirmedShop:!!currentName&&!!currentNumber,
     fetchedAt:new Date().toISOString()
   };
+  result.live.accessState={
+    homeUseStateCode:readable(h.use_state,24)||null,
+    ticketSeatStateCode:readable(chosenTicket?.seatState,24)||null,
+    recentUseStateCode:readable(chosenRecent?.useState,24)||null,
+    verifiedMeaning:false,
+    explanation:'공식 서버의 상태 원본 코드입니다. 입실·퇴실 의미는 아직 검증되지 않았습니다.'
+  };
   result.live.entryQrAvailable=typeof h.home_qr_code==='string'&&h.home_qr_code.length>0;
   result.live.recentShops=recentStores;
   result.live.ticketItems=tickets;
