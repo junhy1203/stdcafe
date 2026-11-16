@@ -13,7 +13,7 @@ import {parseSeatLayout,parseSeatResponse,findSeatApiPaths} from './seat-map.mjs
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-personal-seat-v11';
+const APP_VERSION = '2026-11-16-seat-diagnostic-v12';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -518,7 +518,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
             floorNo,source:null,detectedScripts:scripts,detectedReadApis:lookupPaths,
             inspected,probes,
-            attempts:attempts.map(a=>({name:a.name,error:a.error||'',summary:a.summary||null,hints:a.inspect?.hints||null,redirects:a.redirects||[],finalPath:a.finalPath||null,htmlCharacters:a.inspect?.htmlCharacters??null}))
+            attempts:attempts.map(a=>({name:a.name,error:a.error||'',summary:a.summary||null,hints:a.inspect?.hints||null,structure:a.inspect?.structure||null,redirects:a.redirects||[],finalPath:a.finalPath||null,htmlCharacters:a.inspect?.htmlCharacters??null}))
           };
           return response(res,200,{
             ok:false,shopName:readable(home.home_shop_name),floorNo,seats:[],
