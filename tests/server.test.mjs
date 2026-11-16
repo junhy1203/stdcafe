@@ -418,7 +418,7 @@ test('entry, availability and QR elements exist in browser shell',async()=>{
     assert.ok(html.includes('id="'+id+'"'),'Missing HTML element '+id);
     assert.ok(js.includes("'"+id+"'"),'Missing JS reference '+id);
   }
-  assert.ok(html.includes('app.js?v=20261116-dual-room-view-v16'),'cache-version not updated');
+  assert.ok(html.includes('app.js?v=20261116-reference-floorplan-v17'),'cache-version not updated');
 });
 
 test('QR ES module is deployed and served with the right MIME type',async()=>{
@@ -1125,4 +1125,56 @@ test('native layout diagnostics capture sanitized CSS paths and numeric geometry
   assert.equal(report.inlineCss.containsBackgroundAsset,true);
   assert.ok(!JSON.stringify(report).includes(secret));
   assert.ok(parseSeatLayout(html,'enter').inspect.nativeLayout.stylesheets.includes('/css/seat-plan.css'));
+});
+
+
+test('screenshot reference plans contain all visible distinct coordinates and preserve unpictured seats',async()=>{
+  const fs=await import('node:fs/promises');
+  const app=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
+  const from=app.indexOf('function screenshotSeatPlan(zone){');
+  const to=app.indexOf('function renderScreenshotFloorPlan(',from);
+  assert.ok(from>=0&&to>from,'reference geometry must be accessible');
+  const plan=new Function(app.slice(from,to)+'\nreturn screenshotSeatPlan;')();
+  const room1=plan('1'),room2=plan('2');
+  assert.equal(room1.seats.length,98);
+  assert.equal(room2.seats.length,76);
+  const seen=new Set();
+  for(const p of [...room1.seats,...room2.seats]){
+    assert.match(p.id,/^\d+$/);
+    assert.ok(Number(p.id)>=1&&Number(p.id)<=186);
+    assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.y));
+    assert.ok(p.x>=0&&p.y>=0);
+    assert.ok(!seen.has(p.id),'duplicate photographed seat '+p.id);
+    seen.add(p.id);
+  }
+  assert.deepEqual(room2.missing,Array.from({length:12},(_,i)=>121+i));
+  assert.ok(room2.missing.every(id=>!seen.has(String(id))));
+  assert.ok(room1.seats.some(x=>x.id==='1'));
+  assert.ok(room1.seats.some(x=>x.id==='98'));
+  assert.ok(room2.seats.some(x=>x.id==='186'));
+  assert.equal(room1.seats.filter(x=>x.id==='99').length,0);
+});
+test('real reference floorplan uses live statuses only and cannot run entry on seat tap',async()=>{
+  const fs=await import('node:fs/promises');
+  const js=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
+  const css=await fs.readFile(new URL('../public/style.css',import.meta.url),'utf8');
+  const html=await fs.readFile(new URL('../public/index.html',import.meta.url),'utf8');
+  assert.match(js,/referenceStore=.*'회원모아독서실'/);
+  assert.ok(js.includes("const status=['available','occupied','disabled'].includes(matched?.status)?matched.status:'unknown'"));
+  assert.ok(js.includes("배치 위치는 제공된 사진을 기준으로 재구성했습니다"));
+  assert.ok(js.includes("parent.classList.add('reference-floor-plan')"));
+  assert.ok(css.includes('.seat-grid.full.reference-floor-plan'));
+  assert.ok(html.includes('20261116-reference-floorplan-v17'));
+});
+test('entry and departure provide official authenticated QR with no unverified checkout POST',async()=>{
+  const fs=await import('node:fs/promises');
+  const js=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
+  const html=await fs.readFile(new URL('../public/index.html',import.meta.url),'utf8');
+  for(const id of ['entry-open-home','entry-open-seats','exit-open-home','exit-open-seats','access-verify','access-explanation'])
+    assert.ok(html.includes('id="'+id+'"'));
+  assert.ok(js.includes("()=>openAccess('enter')"));
+  assert.ok(js.includes("()=>openAccess('exit')"));
+  assert.ok(js.includes("const data=await requestJson('/api/entry-qr')"));
+  assert.ok(js.includes("await fetchLive()"));
+  assert.ok(!js.includes("requestJson('/api/exit'"));
 });
