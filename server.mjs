@@ -194,7 +194,12 @@ function extractStructuredData(home, goods, fallback) {
   const chosenRecent=currentRecent||recentStores[0];
   // APK renders home_shop_user_remain_m with a KRW ("원") suffix: it is monetary,
   // NOT remaining study time. Never convert it into minutes.
-  const inferredMinutes=validMinutes(currentRecent?.remainingRaw);
+  // REMAIN_PERIOD is delivered by the app's 1101 goods endpoint. For a product
+  // explicitly named a time pass, interpret it as minutes (provisional until
+  // compared with the official app's displayed remaining time).
+  const timePass=/(?:\d+\s*시간|시간권|time\s*pass)/i.test(chosenTicket?.goodsName||'');
+  const inferredMinutes=(timePass?validMinutes(chosenTicket?.remainingPeriod):null)
+    ?? validMinutes(currentRecent?.remainingRaw);
   // Do not report a merely recent/historical store as the currently linked cafe.
   const confirmedStoreName=currentName||(currentNumber?(currentTicket?.shopName||currentRecent?.name||''):'');
   const result=asStatus(fallback,'');
@@ -208,6 +213,7 @@ function extractStructuredData(home, goods, fallback) {
     totalMinutes:null
   };
   result.live.currentShop={name:currentName,shopNo:currentNumber,floorNo:readable(h.home_floor_no,30)};
+  result.live.remainingTimeInterpretation=timePass&&validMinutes(chosenTicket?.remainingPeriod)!==null?'REMAIN_PERIOD를 분 단위로 잠정 해석':'미확인';
   // These counters power the native app's occupied/total labels.
   // Individual seats are intentionally not fabricated from aggregate counts.
   result.live.seatAvailability={
