@@ -8,8 +8,8 @@
   <meta name="robots" content="noindex,nofollow" />
   <title>SSAMCAFE Web — 개인용 조회 클라이언트</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="style.css?v=20261116-personal-seat-v11" />
-  <script defer src="app.js?v=20261116-personal-seat-v11"></script>
+  <link rel="stylesheet" href="style.css?v=20261116-seat-diagnostic-v12" />
+  <script defer src="app.js?v=20261116-seat-diagnostic-v12"></script>
 </head>
 <body>
   <div class="shell">
@@ -85,8 +85,9 @@
         <section class="panel single-panel"><div class="panel-title"><div><h2 id="seats-store-name">매장 좌석 배치</h2><p id="seats-hint">좌석을 선택하면 상태가 표시됩니다.</p></div><div class="seat-totals"><span class="dot available"></span><strong id="seat-available-total">0</strong><span class="dot occupied"></span><strong id="seat-occupied-total">0</strong></div></div><div class="seat-map-controls">
   <button type="button" class="secondary" id="seat-layout-refresh">개별 좌석 상태 조회</button>
   <span id="seat-layout-status" role="status">좌석별 화면은 매장·층 정보를 이용해 별도로 조회합니다.</span>
+  <button type="button" class="secondary" id="seat-diagnostic-copy">좌석 조회 진단 복사</button>
 </div>
-<div id="seat-map-full" class="seat-grid full" aria-label="개별 좌석 배치도"></div><div class="map-key"><span><i class="legend-square available"></i>이용 가능</span><span><i class="legend-square occupied"></i>사용 중</span><span><i class="legend-square my"></i>내 좌석</span><span><i class="legend-square disabled"></i>사용 불가</span></div><div id="seat-detail" class="seat-detail" role="status">좌석을 선택하면 상세 상태를 확인할 수 있어요.</div></section><section id="live-seat-panel" class="panel live-panel" hidden><h2>공식 좌석 조회 화면의 데이터</h2><div id="live-seat-source" class="source-list"></div></section></section>
+<div id="seat-map-full" class="seat-grid full" aria-label="개별 좌석 배치도"></div><textarea id="seat-diagnostic-export" class="seat-diagnostic-export" readonly hidden aria-label="민감정보를 제외한 좌석 진단 결과"></textarea><div class="map-key"><span><i class="legend-square available"></i>이용 가능</span><span><i class="legend-square occupied"></i>사용 중</span><span><i class="legend-square my"></i>내 좌석</span><span><i class="legend-square disabled"></i>사용 불가</span></div><div id="seat-detail" class="seat-detail" role="status">좌석을 선택하면 상세 상태를 확인할 수 있어요.</div></section><section id="live-seat-panel" class="panel live-panel" hidden><h2>공식 좌석 조회 화면의 데이터</h2><div id="live-seat-source" class="source-list"></div></section></section>
         <section id="view-tickets" class="view"><div class="page-heading"><div><div class="eyebrow">MY PASS</div><h1>이용권 정보</h1><p>남은 이용시간과 좌석 정보를 확인하세요.</p></div></div><div class="ticket-layout"><section class="panel pass-card"><div class="pass-label">ACTIVE PASS</div><h2 id="pass-title">—</h2><div class="pass-time" id="pass-left">—</div><p>남은 이용시간</p><div class="pass-progress"><div id="pass-bar"></div></div><div class="pass-footer"><span>전체 이용시간</span><strong id="pass-total">—</strong></div></section><section class="panel pass-details"><h2>이용 정보</h2><dl><div><dt>매장</dt><dd id="pass-store">—</dd></div><div><dt>현재 좌석</dt><dd id="pass-seat">—</dd></div><div><dt>데이터 시각</dt><dd id="pass-updated">—</dd></div><div><dt>데이터 출처</dt><dd id="pass-source">—</dd></div></dl><div class="info-note">서버 조회만 지원하며 결제·예약·입퇴실 변경 요청은 하지 않습니다.</div></section></div><section id="live-ticket-panel" class="panel live-panel" hidden><h2>공식 이용권 조회 화면의 데이터</h2><div id="live-ticket-source" class="source-list"></div></section></section>
       </div>
     </main>
