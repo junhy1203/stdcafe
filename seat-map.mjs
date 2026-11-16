@@ -242,8 +242,39 @@ function jsonOutline(value,depth=0,seen={count:0}){
     }
     return {type:'object',propertyCount:Object.keys(value).length,properties};
   }
+  if(typeof value==='string'&&depth<4&&value.length<200000&&/^[\s]*[\[{]/.test(value)){
+    try{return {type:'json-string',length:value.length,outline:jsonOutline(JSON.parse(value),depth+1,seen)};}
+    catch{}
+  }
   return {type:typeof value,...(typeof value==='string'?{length:value.length}:null)};
 }
+
+function statusCodeCounts(root){
+  const found={},stack=[{value:root,depth:0}];let remaining=600;
+  while(stack.length&&remaining-->0){
+    const node=stack.pop();
+    if(node.depth>7||!node.value||typeof node.value!=='object')continue;
+    const values=Array.isArray(node.value)?node.value.slice(0,300).map((v,i)=>[String(i),v]):
+      Object.entries(node.value).slice(0,90);
+    for(const [key,val] of values){
+      if(/^(?:seat_status|seatStatus|SEAT_STATUS|seat_state|SEAT_STATE|seatState|USE_YN|use_yn|USE_STATE|isUsed|occupied|status)$/i.test(key)){
+        if((typeof val==='string'||typeof val==='number'||typeof val==='boolean')){
+          const code=String(val);
+          if(/^[A-Za-z0-9_-]{1,10}$/.test(code)){
+            found[key]??={};
+            found[key][code]=(found[key][code]||0)+1;
+          }
+        }
+      }
+      if(val&&typeof val==='object')stack.push({value:val,depth:node.depth+1});
+      if(typeof val==='string'&&val.length<120000&&/^[\s]*[\[{]/.test(val)){
+        try{stack.push({value:JSON.parse(val),depth:node.depth+1})}catch{}
+      }
+    }
+  }
+  return found;
+}
+
 export function analyzeSeatDocument(raw,mime=''){
   if(typeof raw!=='string'||raw.length>MAX_HTML)return {invalid:true};
   const base={characters:raw.length,format:/json/i.test(mime)?'json':/<(?:html|body|div|script|form|table|svg)\b/i.test(raw)?'html':'text'};
@@ -251,7 +282,7 @@ export function analyzeSeatDocument(raw,mime=''){
   if(/^[\[{]/.test(trimmed)){
     try {
       const value=JSON.parse(trimmed);
-      return {...base,format:'json',outline:jsonOutline(value)};
+      return {...base,format:'json',outline:jsonOutline(value),statusCodes:statusCodeCounts(value)};
     }catch{}
   }
   // For non-HTML responses, record only length and classification.
