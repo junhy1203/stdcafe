@@ -13,7 +13,7 @@ const demo = {
   updatedAt:null
 };
 
-const statusNames = {available:'이용 가능', occupied:'사용 중', mine:'내 좌석', disabled:'사용 불가'};
+const statusNames = {available:'이용 가능', occupied:'사용 중', mine:'내 좌석', disabled:'사용 불가', unknown:'상태 미확인'};
 // Never show fictitious seats or remaining time by default. Sample data is opt-in only.
 const emptyData = {
   store:{name:'매장 정보 미확인',address:'로그인 후 서버 조회가 필요합니다.'},
@@ -24,6 +24,8 @@ let state = {data:emptyData, origin:'unlinked', endpoint:null, selectedSeat:null
 let csrfToken = '';
 let liveAuthenticated = false;
 let liveAvailability = null;
+let seatLayoutMeta = null;
+let seatLayoutRequested = false;
 const $ = id => document.getElementById(id);
 let toastTimer;
 function toast(message) {
@@ -38,10 +40,12 @@ function normalize(input){
   if(!input || typeof input !== 'object' || !input.store || !input.member || !Array.isArray(input.seats)) throw Error('store, member, seats 배열이 필요합니다. sample-data.json을 참고해 주세요.');
   if(!input.member.ticket || typeof input.member.ticket !== 'object') throw Error('member.ticket에 이용권 정보가 있어야 합니다.');
   if(input.seats.length>500) throw Error('좌석은 최대 500개까지 지원합니다.');
-  const validStatuses = ['available','occupied','mine','disabled'];
+  const validStatuses = ['available','occupied','mine','disabled','unknown'];
   const seats = input.seats.map((s,i)=>{
     if(!s || typeof s.id!=='string' || !validStatuses.includes(s.status)) throw Error(`${i+1}번째 좌석 데이터가 올바르지 않습니다.`);
-    return {id:s.id.slice(0,30),status:s.status};
+    return {id:s.id.slice(0,30),status:s.status,
+      x:Number.isFinite(Number(s.x))&&s.x!==null?Number(s.x):null,
+      y:Number.isFinite(Number(s.y))&&s.y!==null?Number(s.y):null};
   });
   const t=input.member.ticket;
   return {
@@ -52,14 +56,35 @@ function normalize(input){
 }
 function buildSeats(containerId){
   const parent=$(containerId);parent.replaceChildren();
-  if(!state.data.seats.length){const info=document.createElement('p');info.className='empty-seats';info.textContent='현재 서버 응답에서 좌석별 상태 데이터를 확인하지 못했습니다.';parent.appendChild(info);return;}
+  parent.classList.remove('physical-floor-plan');
+  const seats=state.data.seats;
+  if(!seats.length){
+    const info=document.createElement('p');info.className='empty-seats';
+    info.textContent='공식 서버에서 좌석별 번호·상태를 아직 확인하지 못했습니다. 좌석 현황의 개별 좌석 조회 버튼으로 확인해 주세요.';
+    parent.appendChild(info);return;
+  }
+  const spatial=containerId==='seat-map-full'&&seatLayoutMeta?.actualPositions;
+  const points=seats.filter(t=>t.x!==null&&t.y!==null);
+  const minx=Math.min(...points.map(t=>t.x)),maxx=Math.max(...points.map(t=>t.x));
+  const miny=Math.min(...points.map(t=>t.y)),maxy=Math.max(...points.map(t=>t.y));
+  if(spatial&&maxx>minx&&maxy>miny)parent.classList.add('physical-floor-plan');
   const fragment=document.createDocumentFragment();
-  for(const seat of state.data.seats){
-    const b=document.createElement('button');b.type='button';b.className=`seat ${seat.status}${state.selectedSeat===seat.id ? ' selected':''}`;b.textContent=seat.id;b.title=`${seat.id} · ${statusNames[seat.status]}`;
+  const items=containerId==='seat-map-home'&&seats.length>48?seats.slice(0,48):seats;
+  for(const seat of items){
+    const b=document.createElement('button');
+    b.type='button';
+    b.className=`seat ${seat.status}${state.selectedSeat===seat.id?' selected':''}`;
+    b.textContent=seat.id;
+    b.title=`${seat.id} · ${statusNames[seat.status]||'상태 미확인'}`;
     b.setAttribute('aria-label',b.title);
+    if(parent.classList.contains('physical-floor-plan')&&seat.x!==null&&seat.y!==null){
+      b.style.left=(5+(seat.x-minx)/(maxx-minx)*90).toFixed(3)+'%';
+      b.style.top=(5+(seat.y-miny)/(maxy-miny)*85).toFixed(3)+'%';
+    }
     b.addEventListener('click',()=>{
       state.selectedSeat=seat.id;
-      const el=$('seat-detail');el.textContent=`${seat.id} · ${statusNames[seat.status]}${state.origin==='demo'?' (예시 데이터)':''} — 실제 예약/변경은 할 수 없습니다.`;
+      const el=$('seat-detail');
+      el.textContent=`${seat.id} · ${statusNames[seat.status]||'상태 미확인'}${state.origin==='demo'?' (예시 데이터)':''} — 보기 전용이며 예약·입실 요청은 보내지 않습니다.`;
       buildSeats('seat-map-full');
       if(containerId==='seat-map-home')navigate('seats');
     });
@@ -79,12 +104,15 @@ function render(){
   const knownFree=aggregate && Number.isInteger(aggregate.available)?aggregate.available:null;
   setText('available-count',knownFree!==null?knownFree+'석':seats.length?nAvailable+'석':'—');
   setText('available-detail',knownFree!==null?'개인석 전체 '+aggregate.total+'석 · 이용 중 '+aggregate.used+'석':seats.length?'전체 '+seats.length+'석 중 이용 가능':'좌석별 이용 현황 미확인');
-  setText('map-summary',seats.length?`전체 ${seats.length}석 · 이용 가능 ${nAvailable}석`:'개별 좌석 상태를 서버 응답에서 확인하지 못했습니다.');
+  const unknown=seats.filter(s=>s.status==='unknown').length;
+  setText('map-summary',seats.length
+    ?'실제 좌석 '+seats.length+'개 · 빈 좌석 '+nAvailable+'개 · 이용 중 '+nOccupied+'개'+(unknown?' · 상태 미확인 '+unknown+'개':'')
+    :'개별 좌석 위치·상태 미조회 · 상단의 현재 매장 집계값과 별개입니다.');
   setText('store-name',d.store.name);setText('store-address',d.store.address);
   setText('last-update',state.origin==='demo'?'예시':safeDate(d.updatedAt));
   setText('seat-available-total',knownFree!==null?knownFree:seats.length?nAvailable:'—');
   setText('seat-occupied-total',aggregate&&Number.isInteger(aggregate.used)?aggregate.used:seats.length?nOccupied:'—');
-  setText('seats-store-name',d.store.name);
+  setText('seats-store-name',d.store.name+(seatLayoutMeta?.floorNo?' · '+seatLayoutMeta.floorNo+'층':''));
   setText('pass-title',t.name);setText('pass-left',minutesText(t.remainingMinutes));setText('pass-total',minutesText(t.totalMinutes));
   $('pass-bar').style.width=ratio+'%';setText('pass-store',d.store.name);
   setText('pass-seat',d.member.seat||'—');setText('pass-updated',state.origin==='demo'?'예시 데이터':safeDate(d.updatedAt));
@@ -136,19 +164,20 @@ function navigate(target){
   for(const item of document.querySelectorAll('[data-view]')){if(item.classList.contains('nav-item'))item.classList.toggle('active',item.dataset.view===target);}
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id===`view-${target}`));
   setText('breadcrumb',names[target]);window.scrollTo(0,0);
+  if(target==='seats'&&liveAuthenticated&&!seatLayoutRequested)loadSeatLayout();
 }
 function showModal(){ $('modal-error').hidden=true;$('modal-overlay').hidden=false;$('data-file').focus(); }
 function hideModal(){ $('modal-overlay').hidden=true; }
 function modalError(message){ $('modal-error').textContent=message;$('modal-error').hidden=false; }
 function updateData(raw,origin){
-  state.data=normalize(raw);state.origin=origin;state.selectedSeat=null;render();if(origin!=='live')clearLiveSources();hideModal();toast('조회 데이터를 화면에 반영했습니다.');
+  seatLayoutMeta=null;seatLayoutRequested=false;state.data=normalize(raw);state.origin=origin;state.selectedSeat=null;render();if(origin!=='live')clearLiveSources();hideModal();toast('조회 데이터를 화면에 반영했습니다.');
 }
 for(const btn of document.querySelectorAll('[data-view]')) btn.addEventListener('click',()=>navigate(btn.dataset.view));
 for(const id of ['settings','settings-nav','connect-cta']) $(id).addEventListener('click',showModal);
 for(const id of ['close-modal','dismiss-modal']) $(id).addEventListener('click',hideModal);
 $('modal-overlay').addEventListener('click',e=>{if(e.target===$('modal-overlay'))hideModal();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')hideModal();});
-$('restore-demo').addEventListener('click',()=>{liveAvailability=null;state={...state,data:demo,origin:'demo',selectedSeat:null,endpoint:null};$('endpoint-url').value='';render();hideModal();toast('예시 데이터로 돌아왔습니다.');});
+$('restore-demo').addEventListener('click',()=>{liveAvailability=null;seatLayoutMeta=null;seatLayoutRequested=false;state={...state,data:demo,origin:'demo',selectedSeat:null,endpoint:null};$('endpoint-url').value='';render();hideModal();toast('예시 데이터로 돌아왔습니다.');});
 $('data-file').addEventListener('change', async e=>{
   const f=e.target.files?.[0];if(!f)return;
   if(f.size>1_000_000){modalError('파일은 1MB 이하만 지원합니다.');return;}
@@ -433,7 +462,7 @@ async function fetchLive(){
   if(!liveAuthenticated){bridgeError('먼저 로그인해 주세요.');return false;}
   const btn=$('refresh');btn.disabled=true;bridgeStatus('쌤카페 서버의 4개 회원 페이지 조회 중…');lookupSummary('로그인 성공 · 실제 회원 페이지 4개를 조회하고 있습니다…');clearBridgeError();
   // Clear stale/demo values before the request, including after a page reload.
-  liveAvailability=null;
+  liveAvailability=null;seatLayoutMeta=null;seatLayoutRequested=false;
   state.data=normalize(liveBlank());state.origin='live';state.endpoint=null;state.selectedSeat=null;render();
   try{
     const received=await requestJson('/api/status');
@@ -468,6 +497,7 @@ async function fetchLive(){
       return false;
     }
     state.origin='live';render();
+    if(state.currentView==='seats')await loadSeatLayout();
     bridgeStatus('로그인됨 · 앱 API '+apiCount+'/2개 · 웹페이지 '+count+'/4개 · 확인된 값 반영');
     lookupSummary('현재 매장: '+(received.store?.name&&received.store.name!=='매장 정보 미확인'?'확인':'미확인')+' · 이용권: '+(received.live?.ticketItems?.length?'확인':'미확인')+' · 좌석: '+(received.member?.seat?'확인':'미확인')+' · 잔여시간: '+(Number.isFinite(received.member?.ticket?.remainingMinutes)?'확인':'미확인'));
     toast('실제 앱 데이터 '+apiCount+'/2개 API 조회 · 확인된 항목만 반영');
@@ -482,6 +512,41 @@ async function fetchLive(){
     return false;
   }finally{btn.disabled=false;}
 }
+
+async function loadSeatLayout(force=false){
+  if(!liveAuthenticated){
+    setText('seat-layout-status','좌석별 배치를 조회하려면 먼저 로그인해야 합니다.');
+    return false;
+  }
+  if(seatLayoutRequested&&!force)return true;
+  const btn=$('seat-layout-refresh');
+  btn.disabled=true;
+  setText('seat-layout-status','쌤카페 앱의 실제 좌석 선택 화면을 조회하고 있습니다…');
+  seatLayoutRequested=true;
+  try{
+    const payload=await requestJson('/api/seat-layout');
+    if(!payload.ok||!Array.isArray(payload.seats)||payload.seats.length===0){
+      seatLayoutMeta={actualPositions:false,floorNo:payload.floorNo||''};
+      state.data=normalize({...state.data,seats:[]});render();
+      const reason=payload.reason||'서버 응답에 개별 좌석 상태가 없습니다.';
+      setText('seat-layout-status',reason+' · 좌석 총계와 구분해 표시합니다.');
+      return false;
+    }
+    seatLayoutMeta={actualPositions:!!payload.actualPositions,floorNo:payload.floorNo||'',source:payload.source};
+    state.data=normalize({...state.data,seats:payload.seats});render();
+    const report=payload.summary||{};
+    setText('seat-layout-status',
+      '실제 좌석 '+payload.seats.length+'개 조회 · 빈 좌석 '+(report.available||0)+'개 · 사용 중 '+(report.occupied||0)+'개'+
+      (report.unknown?' · 상태 미확인 '+report.unknown+'개':'')+
+      (payload.actualPositions?' · 서버 제공 좌표로 실제 배치':' · 위치 정보가 없어 목록형 그림으로 표시'));
+    return true;
+  }catch(err){
+    seatLayoutRequested=false;
+    setText('seat-layout-status','좌석별 화면 조회 실패: '+err.message);
+    return false;
+  }finally{btn.disabled=false;}
+}
+$('seat-layout-refresh').addEventListener('click',()=>loadSeatLayout(true));
 
 const QR_NS='http://www.w3.org/2000/svg';
 function closeEntry(){
