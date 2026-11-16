@@ -64,3 +64,15 @@
  .availability-counters{grid-template-columns:1fr}
  .availability-counter{padding:14px}
 }
+
+/* Seat diagram: physically placed only when the upstream page supplies coordinates. */
+.seat-map-controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:8px 0 22px}
+.seat-map-controls button{cursor:pointer;border:1px solid #e3e0ee;background:#f7f5ff;color:#5142ac;border-radius:9px;padding:11px 15px;font-weight:750;font-size:12px}
+.seat-map-controls button:disabled{opacity:.55;cursor:wait}
+#seat-layout-status{font-size:12px;line-height:1.6;color:#6c7080;overflow-wrap:anywhere}
+.seat.unknown{background:#f7f7fb;color:#9296a5;border:1px dashed #bfc2d3}
+.legend-square.unknown{background:#f7f7fb;border:1px dashed #bfc2d3}
+.seat-grid.full.physical-floor-plan{position:relative;display:block;max-width:100%;min-height:580px;height:580px;border-radius:14px;background:linear-gradient(#f3f2fa 1px,transparent 1px),linear-gradient(90deg,#f3f2fa 1px,transparent 1px),#fcfbff;background-size:38px 38px;overflow:auto;border:1px solid #edeaf6}
+.seat-grid.full.physical-floor-plan .seat{position:absolute;width:42px;height:33px;aspect-ratio:auto;margin-left:-21px;margin-top:-16px;border-radius:7px;z-index:1;font-size:10px}
+.seat-grid.full.physical-floor-plan .seat:hover,.seat-grid.full.physical-floor-plan .seat:focus-visible{z-index:10}
+@media(max-width:740px){.seat-grid.full.physical-floor-plan{min-width:680px}.seat-map-controls button{width:100%}.seat-map-controls{align-items:stretch}}
