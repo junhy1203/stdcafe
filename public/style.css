@@ -77,6 +77,14 @@
 .seat-grid.full.physical-floor-plan .seat:hover,.seat-grid.full.physical-floor-plan .seat:focus-visible{z-index:10}
 @media(max-width:740px){.seat-grid.full.physical-floor-plan{min-width:680px}.seat-map-controls button{width:100%}.seat-map-controls{align-items:stretch}}
 
+/* Native app seating zones are viewable independently of pass type. */
+.room-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 8px;padding:5px;border:1px solid #e7e6ed;background:#f7f6fb;border-radius:12px;width:max-content;max-width:100%}
+.room-tabs .room-tab{border:0;border-radius:9px;padding:12px 15px;background:transparent;color:#626678;font:inherit;font-size:13px;font-weight:750;cursor:pointer}
+.room-tabs .room-tab.active{background:#fff;color:#5c3bdc;box-shadow:0 1px 6px #24233a15}
+.room-tabs .room-tab:focus-visible{outline:2px solid #5b3fd9;outline-offset:2px}
+.room-info{font-size:12px;color:#727587;margin:0 0 18px;line-height:1.6}
+@media(max-width:740px){.room-tabs{width:100%}.room-tabs .room-tab{flex:1;min-width:0;padding:11px 8px;font-size:12px}}
+
 /* Copyable redacted diagnostic text for iPad Safari (including non-HTTPS local VPN). */
 .seat-diagnostic-export{display:block;width:100%;min-height:160px;margin-top:16px;padding:12px;border:1px solid #dddbea;background:#f9f8ff;color:#414156;border-radius:10px;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;white-space:pre;resize:vertical}
 .seat-diagnostic-export[hidden]{display:none}
