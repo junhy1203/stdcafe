@@ -10,7 +10,7 @@ const SEAT_KEYS = ['SEAT_NO','seat_no','seatNo','seat_num','seatNum','SEAT_NUM',
 const STATUS_KEYS = ['SEAT_STATUS','seat_status','seatStatus','status','STATUS','USE_YN','use_yn','usedYn','USED_YN','USE_STATE','useState','state','STATE','isUsed','occupied','isOccupied'];
 const X_KEYS = ['SEAT_X','seat_x','seatX','SEAT_POSITION_X','POS_X','pos_x','posX','x','X','LEFT','left','leftPos'];
 const Y_KEYS = ['SEAT_Y','seat_y','seatY','SEAT_POSITION_Y','POS_Y','pos_y','posY','y','Y','TOP','top','topPos'];
-const ATTR_SEAT_KEYS=['data-seat-no','data-seat-id','data-seatnum','data-seat-num','data-seat-number','data-no'];
+const ATTR_SEAT_KEYS=['data-seat-no','data-seat-id','data-seatnum','data-seat-num','data-seat-number','data-no','data-seat','seat-no','seatnum'];
 const ATTR_STATUS_KEYS=['data-seat-status','data-status','data-state','data-use-yn','data-occupied','data-used','aria-label','title'];
 const get = (o,keys) => { for(const k of keys) if(Object.hasOwn(o,k) && o[k]!==null && o[k]!==undefined) return [o[k],k]; return [null,null]; };
 function safeString(v,n=64){return typeof v==='string'||typeof v==='number'?String(v).trim().slice(0,n):'';}
@@ -71,7 +71,13 @@ function htmlAttrs(tag){
   return attrs;
 }
 function seatFromElement(a){
-  const id=ATTR_SEAT_KEYS.map(k=>a[k]).find(Boolean);
+  let id=ATTR_SEAT_KEYS.map(k=>a[k]).find(Boolean);
+  // Native seat charts sometimes encode the seat number in the element ID.
+  // Only accept explicitly seat-prefixed IDs, never arbitrary DOM IDs.
+  if(!id&&typeof a.id==='string'){
+    const m=/^(?:seat|chair)[-_]?([A-Za-z0-9_-]{1,25})$/i.exec(a.id);
+    if(m)id=m[1];
+  }
   if(!id)return null;
   const obj={SEAT_NO:id};
   for(const key of ATTR_STATUS_KEYS){
