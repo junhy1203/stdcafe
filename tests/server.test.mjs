@@ -683,3 +683,38 @@ test('APK personal seat page is the primary individual-seat source',async()=>{
     assert.deepEqual(calls.map(x=>x.path),['/api/app.do','/api/app.do','/mobile/purchase/personal.do']);
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+
+test('personal-seat WebView same-origin redirect is followed without leaking credentials', async () => {
+  const routes=[];
+  const mock=async(url,options)=>{
+    const u=new URL(url);routes.push(u.pathname);
+    if(u.pathname==='/api/app.do'){
+      const payload=JSON.parse(options.body);
+      if(payload.cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'TEST_SECRET'}}),'application/json');
+      if(payload.cmd==='1100')return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'S1',home_floor_no:'2',home_shop_name:'테스트'}}),'application/json');
+    }
+    if(u.pathname==='/mobile/purchase/personal.do'){
+      return new Response(null,{status:302,headers:{location:'/mobile/purchase/personalChart.do'}});
+    }
+    if(u.pathname==='/mobile/purchase/personalChart.do'){
+      return mkResponse('<html><div data-seat-no="1" data-use-yn="N"></div><div data-seat-no="2" data-use-yn="Y"></div></html>','text/html');
+    }
+    throw Error('Unexpected upstream route '+u.pathname);
+  };
+  const server=createApp({fetchImpl:mock});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const response=await fetch(base+'/api/session'),initial=await response.json(),Cookie=response.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':initial.csrf},body:JSON.stringify({username:'u',password:'p'})});
+    assert.equal(login.status,200);
+    const map=await fetch(base+'/api/seat-layout',{headers:{Cookie}});
+    const raw=await map.text(),json=JSON.parse(raw);
+    assert.equal(json.ok,true);
+    assert.equal(json.seats.length,2);
+    assert.equal(json.source,'personal');
+    assert.ok(!raw.includes('TEST_SECRET'));
+    assert.deepEqual(routes,['/api/app.do','/api/app.do','/mobile/purchase/personal.do','/mobile/purchase/personalChart.do']);
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
