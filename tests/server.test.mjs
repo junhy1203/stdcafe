@@ -418,7 +418,7 @@ test('entry, availability and QR elements exist in browser shell',async()=>{
     assert.ok(html.includes('id="'+id+'"'),'Missing HTML element '+id);
     assert.ok(js.includes("'"+id+"'"),'Missing JS reference '+id);
   }
-  assert.ok(html.includes('app.js?v=20261116-seat-forensics-v14'),'cache-version not updated');
+  assert.ok(html.includes('app.js?v=20261116-native-seat-markers-v15'),'cache-version not updated');
 });
 
 test('QR ES module is deployed and served with the right MIME type',async()=>{
@@ -918,4 +918,112 @@ test('iPad diagnostic JSON download uses only redacted report data',async()=>{
   assert.ok(app.includes('stdcafe-seat-diagnostics-v14.json'));
   assert.ok(app.includes('URL.createObjectURL(file)'));
   assert.ok(css.includes('#seat-diagnostic-save'));
+});
+
+
+test('native inline seat markers appear as partial unknown-status seats',async()=>{
+  const {parseSeatLayout,extractNativeSeatMarkers}=await import('../seat-map.mjs');
+  const ids=[19,4,23,65,43,15,10,46,27,59,57,3,66,62,22,67,13,58,41,56,47,63,
+    38,25,26,87,94,73,82,90,77,98,45,42,24,1,11,16,7,9,21,8,5,12,20,30,52,2,
+    17,50,88,91,71,97,84,79];
+  let page='<html><div class="wrap-seat"><div class="seat"></div></div>';
+  for(const id of ids)page+='<script>$("#seatNo_'+id+'").addClass("some-undocumented-code")</script>';
+  page+='<script>function fn_seatList(){ const seatState="C"; }</script></html>';
+  const result=extractNativeSeatMarkers(page);
+  assert.equal(result.seats.length,56);
+  assert.deepEqual(new Set(result.seats.map(x=>x.id)).size,56);
+  const view=parseSeatLayout(page,'enter');
+  assert.equal(view.seats.length,56);
+  assert.equal(view.summary.available,0);
+  assert.equal(view.summary.occupied,0);
+  assert.equal(view.summary.unknown,56);
+  assert.equal(view.partialSeatList,true);
+  assert.equal(view.actualPositions,false);
+  assert.equal(view.summary.completeFloorLayout,false);
+  assert.ok(view.seats.every(x=>x.status==='unknown'&&x.x===null&&x.y===null));
+});
+test('native seat classes with explicit known status preserve verified occupancy',async()=>{
+  const {parseSeatLayout}=await import('../seat-map.mjs');
+  const page='<html><div class="seat seatNo_1 available"></div><div class="seat seatNo_2 occupied"></div>'+
+    '<script>$(".seatNo_3").addClass("unclear-state")</script><script>$(".seatNo_4").addClass("unknown-code")</script>'+
+    '<script>$(".seatNo_5").addClass("unknown-code")</script></html>';
+  const view=parseSeatLayout(page,'enter');
+  assert.equal(view.summary.available,1);
+  assert.equal(view.summary.occupied,1);
+  assert.equal(view.summary.unknown,3);
+  assert.equal(view.partialSeatList,false);
+  assert.equal(view.seats.find(x=>x.id==='1').status,'available');
+  assert.equal(view.seats.find(x=>x.id==='2').status,'occupied');
+});
+test('server keeps scanning verified API after finding unknown native seat IDs',async()=>{
+  const calls=[];
+  const mock=async (url,options)=>{
+    const u=new URL(url);calls.push(u.pathname);
+    if(u.pathname==='/api/app.do'){
+      const cmd=JSON.parse(options.body).cmd;
+      if(cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'TOKEN_SECRET'}}),'application/json');
+      return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'77',home_floor_no:'1',home_shop_name:'TEST'}}),'application/json');
+    }
+    if(u.pathname==='/mobile/purchase/personal.do')
+      return mkResponse('<html><script>var seatMap="/mobile/purchase/chart.do";</script></html>','text/html');
+    if(u.pathname==='/mobile/enterSeatView.do')
+      return mkResponse('<html><div class="wrap-seat"></div><script>var seatNo_19=1;</script><script>var seatNo_4=2;</script><script>var seatNo_23=3;</script></html>','text/html');
+    if(u.pathname==='/mobile/seatChangeView.do')return mkResponse('<html><p>not entered</p></html>','text/html');
+    if(u.pathname==='/mobile/purchase/chart.do')
+      return mkResponse(JSON.stringify({seatList:[{SEAT_NO:'11',USE_YN:'Y'},{SEAT_NO:'12',USE_YN:'N'}]}),'application/json');
+    throw Error('unexpected '+u.pathname);
+  };
+  const server=createApp({fetchImpl:mock});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const init=await fetch(base+'/api/session'),csrf=(await init.json()).csrf,Cookie=init.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'demo',password:'example'})});
+    assert.equal(login.status,200);
+    const map=await fetch(base+'/api/seat-layout',{headers:{Cookie}});
+    assert.equal(map.status,200);
+    const result=await map.json();
+    assert.equal(result.ok,true);
+    assert.equal(result.source,'app-seat-api');
+    assert.equal(result.summary.available,1);
+    assert.equal(result.summary.occupied,1);
+    assert.ok(calls.includes('/mobile/purchase/chart.do'));
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
+test('server returns partial marker-only seats when upstream chart has no occupancy evidence',async()=>{
+  const mock=async(url,opts)=>{
+    const u=new URL(url);
+    if(u.pathname==='/api/app.do'){
+      const cmd=JSON.parse(opts.body).cmd;
+      if(cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'TOKEN_SECRET'}}),'application/json');
+      return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'77',home_floor_no:'1',home_shop_name:'TEST',home_shop_tot_p:174,home_shop_use_p:72}}),'application/json');
+    }
+    if(u.pathname==='/mobile/purchase/personal.do')
+      return mkResponse('<html><script>var seatMap="/mobile/purchase/chart.do";</script></html>','text/html');
+    if(u.pathname==='/mobile/enterSeatView.do')
+      return mkResponse('<html><div class="wrap-seat"></div><script>var seatNo_19=1;</script><script>var seatNo_4=2;</script><script>var seatNo_23=3;</script></html>','text/html');
+    if(u.pathname==='/mobile/seatChangeView.do')return mkResponse('<html></html>','text/html');
+    if(u.pathname==='/mobile/purchase/chart.do')return mkResponse('<html><p>Not valid parameters</p></html>','text/html');
+    throw Error('unexpected '+u.pathname);
+  };
+  const server=createApp({fetchImpl:mock});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const init=await fetch(base+'/api/session'),csrf=(await init.json()).csrf,Cookie=init.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'demo',password:'example'})});
+    assert.equal(login.status,200);
+    const map=await fetch(base+'/api/seat-layout',{headers:{Cookie}});
+    const result=await map.json();
+    assert.equal(result.ok,true);
+    assert.equal(result.partialSeatList,true);
+    assert.equal(result.seats.length,3);
+    assert.equal(result.summary.available,0);
+    assert.equal(result.summary.occupied,0);
+    assert.ok(result.inspect.probes);
+    const diag=await fetch(base+'/api/diagnostics',{headers:{Cookie}});
+    const meta=(await diag.json()).seatPage;
+    assert.equal(meta.summary.nativeMarkerCount,3);
+    assert.equal(meta.attempts.find(x=>x.name==='enter').nativeSeatMarkers.count,3);
+  }finally{await new Promise(resolve=>server.close(resolve))}
 });
