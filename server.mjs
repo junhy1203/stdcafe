@@ -451,6 +451,17 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           if(!/^[0-9A-Za-z_-]{1,40}$/.test(shopNo))
             return response(res,200,{ok:false,source:'app-home',seats:[],reason:'현재 매장번호가 없어 좌석 조회 화면을 특정할 수 없습니다.'});
           const validFloor=/^[0-9A-Za-z_-]{1,40}$/.test(floorNo);
+          const diagnosticContext={
+            hasShopNo:true,hasFloorNo:validFloor,
+            observedCookieCount:s.jar.size,
+            clientType:'Android WebView request emulation',
+            homeResponseKeys:Object.keys(home).filter(k=>/^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(k)&&k!=='__meta').slice(0,100),
+            expectedSeatCounts:{
+              personal:{total:validCount(home.home_shop_tot_p),used:validCount(home.home_shop_use_p)},
+              group:{total:validCount(home.home_shop_tot_g),used:validCount(home.home_shop_use_g)},
+              locker:{total:validCount(home.home_shop_tot_l),used:validCount(home.home_shop_use_l)}
+            }
+          };
           const attempts=[];
           // APK Lg5/c.onSingleClick uses getPersonal() for the normal
           // personal-seat screen (token, device, shop); the earlier code
@@ -468,17 +479,19 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             url.searchParams.set('m_value',s.device);
             url.searchParams.set('SHOP_NO',shopNo);
             if(needsFloor)url.searchParams.set('FLOOR_NO',floorNo);
+            const started=now();
             try{
               const remote=await upstreamMobilePage(url,s.jar);
               const mime=remote.resp.headers.get('content-type')||'';
-              if(!/html/i.test(mime)){attempts.push({name,error:'HTML 형식이 아닌 응답',mime:mime.split(';')[0],redirects:remote.redirects});continue;}
+              if(!/html/i.test(mime)){attempts.push({name,error:'HTML 형식이 아닌 응답',mime:mime.split(';')[0],redirects:remote.redirects,durationMs:now()-started});continue;}
               const parsed=parseSeatLayout(remote.text,name);
-              attempts.push({name,summary:parsed.summary,inspect:parsed.inspect,
+              attempts.push({name,summary:parsed.summary,inspect:parsed.inspect,durationMs:now()-started,
+                requestFieldNames:[...url.searchParams.keys()],requestMethod:'GET',
                 http:seatHttpMetadata(remote.resp,remote.text),
                 redirects:remote.redirects,finalPath:remote.finalPath});
               if(parsed.seats.length){
                 s.lastSeatDiagnostic={
-                  checkedAt:new Date(now()).toISOString(),shopIdentified:Boolean(readable(home.home_shop_name)),
+                  checkedAt:new Date(now()).toISOString(),...diagnosticContext,shopIdentified:Boolean(readable(home.home_shop_name)),
                   floorNo,source:name,summary:parsed.summary,
                   detectedScripts:parsed.inspect.scriptPaths
                 };
@@ -489,7 +502,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                 });
               }
             }catch(e){
-              attempts.push({name,error:e.status?readable(e.message,120):'HTML 구조 또는 응답을 분석할 수 없음'});
+              attempts.push({name,error:e.status?readable(e.message,120):'HTML 구조 또는 응답을 분석할 수 없음',durationMs:now()-started});
             }
           }
           // If the WebView only renders a JavaScript shell, discover the seat
@@ -502,17 +515,18 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           const discovered=[...new Set([...requestHints.map(x=>x.path),...attempts.flatMap(a=>a.inspect?.candidateApiPaths||[])])];
           const inspected=[];
           await Promise.all(scripts.map(async p=>{
+            const assetStarted=now();
             try{
               const url=new URL(p,UPSTREAM);
               if(url.origin!==UPSTREAM)return;
               const remote=await upstream(url,{method:'GET',headers:{Accept:'text/javascript,application/javascript','User-Agent':NATIVE_WEBVIEW_UA,Referer:UPSTREAM+'/mobile/purchase/personal.do'}},s.jar);
               const analysis=analyzeSeatScript(remote.text);
               const candidates=findSeatApiPaths(remote.text);
-              inspected.push({path:p,candidates,
+              inspected.push({path:p,candidates,durationMs:now()-assetStarted,
                 http:seatHttpMetadata(remote.resp,remote.text),code:analysis});
               for(const hint of analysis.requestHints||[])requestHints.push(hint);
               for(const candidate of [...candidates,...(analysis.requestHints||[]).map(h=>h.path)])discovered.push(candidate);
-            }catch{inspected.push({path:p,error:'JavaScript 파일 조회 불가'});}
+            }catch{inspected.push({path:p,error:'JavaScript 파일 조회 불가',durationMs:now()-assetStarted});}
           }));
           // The personal.do form with a checkbox is NOT evidence for a seat API.
           // Do not issue arbitrary POST requests to upstream HTML forms.
@@ -555,6 +569,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                   if(knownFields[key])params.set(key,knownFields[key]);
               }
             }
+            const probeStarted=now();
             try{
               const remote=await upstream(url,{
                 method,
@@ -570,7 +585,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               const result=parseSeatResponse(remote.text,'app-seat-api');
               const type=remote.resp.headers.get('content-type')?.split(';')[0]||'unknown';
               probes.push({
-                path:p,method,evidence,
+                path:p,method,evidence,durationMs:now()-probeStarted,
                 requestedFieldNames:method==='POST'?[...params.keys()]:[...url.searchParams.keys()],
                 sourceHints:matchedHints,
                 http:seatHttpMetadata(remote.resp,remote.text),
@@ -579,7 +594,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               });
               if(result.seats.length){
                 s.lastSeatDiagnostic={
-                  checkedAt:new Date(now()).toISOString(),shopIdentified:Boolean(readable(home.home_shop_name)),
+                  checkedAt:new Date(now()).toISOString(),...diagnosticContext,shopIdentified:Boolean(readable(home.home_shop_name)),
                   floorNo,source:'app-seat-api',summary:result.summary,
                   detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,inspected
                 };
@@ -592,21 +607,22 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
              }catch(e){
               const upstreamStatus=/\bHTTP\s+(\d{3})/.exec(String(e.message||''))?.[1]||null;
               probes.push({
-                path:p,method,evidence,error:e.status?'공식 서버 HTTP 응답 오류':'응답 확인 실패',
+                path:p,method,evidence,durationMs:now()-probeStarted,error:e.status?'공식 서버 HTTP 응답 오류':'응답 확인 실패',
                 upstreamHttpStatus:upstreamStatus?Number(upstreamStatus):null,
                 requestedFieldNames:method==='POST'?[...params.keys()]:[...url.searchParams.keys()]
               });
             }
           }
           s.lastSeatDiagnostic={
-            checkedAt:new Date(now()).toISOString(),shopIdentified:Boolean(readable(home.home_shop_name)),
+            checkedAt:new Date(now()).toISOString(),...diagnosticContext,shopIdentified:Boolean(readable(home.home_shop_name)),
             floorNo,source:null,detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,
             inspected,probes,
             attempts:attempts.map(a=>({
               name:a.name,error:a.error||'',summary:a.summary||null,
               hints:a.inspect?.hints||null,requestHints:a.inspect?.requestHints||[],
               structure:a.inspect?.structure||null,
-              forensic:a.inspect?.forensic||null,http:a.http||null,
+              forensic:a.inspect?.forensic||null,http:a.http||null,durationMs:a.durationMs??null,
+              requestMethod:a.requestMethod||'GET',requestFieldNames:a.requestFieldNames||[],
               redirects:a.redirects||[],finalPath:a.finalPath||null,
               htmlCharacters:a.inspect?.htmlCharacters??null
             }))
