@@ -468,7 +468,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                 });
               }
             }catch(e){
-              attempts.push({name,error:e.status?'공식 웹페이지 조회 오류':'HTML 구조 또는 응답을 분석할 수 없음'});
+              attempts.push({name,error:e.status?readable(e.message,120):'HTML 구조 또는 응답을 분석할 수 없음'});
             }
           }
           // If the WebView only renders a JavaScript shell, discover the seat
@@ -518,7 +518,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
             floorNo,source:null,detectedScripts:scripts,detectedReadApis:lookupPaths,
             inspected,probes,
-            attempts:attempts.map(a=>({name:a.name,error:a.error||'',summary:a.summary||null,hints:a.inspect?.hints||null}))
+            attempts:attempts.map(a=>({name:a.name,error:a.error||'',summary:a.summary||null,hints:a.inspect?.hints||null,redirects:a.redirects||[],finalPath:a.finalPath||null,htmlCharacters:a.inspect?.htmlCharacters??null}))
           };
           return response(res,200,{
             ok:false,shopName:readable(home.home_shop_name),floorNo,seats:[],
