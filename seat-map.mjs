@@ -125,6 +125,65 @@ export function findSeatApiPaths(source){
   }
   return found;
 }
+
+/** Inventory exact read requests found in HTML forms and inline scripts.
+ * Report only route, HTTP verb and parameter NAMES; never expose source,
+ * request bodies, input values, authentication tokens or user identifiers. */
+export function inspectSeatRequests(html){
+  if(typeof html!=='string'||html.length>MAX_HTML)return [];
+  const matches=new Map();
+  const record=(path,method,fields,origin)=>{
+    try{
+      const u=new URL(decodeHtml(path),'https://m.ssamcafe.com');
+      if(u.origin!=='https://m.ssamcafe.com')return;
+      const p=u.pathname;
+      if(!/^\/(?:mobile|api)\/[A-Za-z0-9_./-]{1,180}\.do$/i.test(p))return;
+      if(!/seat|chart|floor|personal|자리|좌석/i.test(p))return;
+      if(/change|cancel|reserve|register|enter|exit|pay|modify|update|insert|delete|save/i.test(p))return;
+      const verb=String(method||'UNKNOWN').toUpperCase();
+      const safeMethod=['GET','POST'].includes(verb)?verb:'UNKNOWN';
+      const safeFields=(fields||[]).filter(x=>/^[A-Za-z][A-Za-z0-9_]{0,45}$/.test(x)).slice(0,30);
+      const key=p+'|'+safeMethod+'|'+origin;
+      if(!matches.has(key))matches.set(key,{path:p,method:safeMethod,fields:safeFields,source:origin});
+      else{
+        const old=matches.get(key);
+        old.fields=[...new Set([...old.fields,...safeFields])].slice(0,30);
+      }
+    }catch{}
+  };
+  // Inspect declared HTML forms without reading their field values.
+  for(const m of html.matchAll(/<form\b([^>]{0,2400})>([\s\S]{0,40000}?)<\/form>/gi)){
+    const attrs=htmlAttrs('<form '+m[1]+'>');
+    if(!attrs.action)continue;
+    const fields=[...m[2].matchAll(/<(?:input|select|textarea)\b[^>]{0,700}\bname\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi)]
+      .map(x=>x[1]||x[2]||x[3]);
+    record(attrs.action,attrs.method||'GET',fields,'form');
+  }
+  // Discover exact static URLs used in JS. Scope verb detection to one
+  // jQuery AJAX block or fetch call, not the entire page.
+  for(const m of html.matchAll(/<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]{0,250000}?)<\/script>/gi)){
+    const body=m[1];
+    for(const call of body.matchAll(/\$\.(?:ajax|get|post)\s*\(([\s\S]{0,2500}?)\)\s*;?/gi)){
+      const raw=call[0],url=/\burl\s*:\s*["']([^"']{1,230})["']/i.exec(raw)
+        ||/\$\.(?:get|post)\s*\(\s*["']([^"']{1,230})["']/i.exec(raw);
+      if(!url)continue;
+      const method=/\$\.post\s*\(/i.test(raw)?'POST':/\$\.get\s*\(/i.test(raw)?'GET':
+        /\b(?:type|method)\s*:\s*["'](GET|POST)["']/i.exec(raw)?.[1]||'UNKNOWN';
+      const data=/\bdata\s*:\s*\{([^}]{0,1000})\}/i.exec(raw);
+      const fields=data?[...data[1].matchAll(/(?:^|,)\s*["']?([A-Za-z][A-Za-z0-9_]{0,45})["']?\s*:/g)].map(x=>x[1]):[];
+      record(url[1],method,fields,'ajax');
+    }
+    for(const call of body.matchAll(/fetch\s*\(\s*["']([^"']{1,230})["']\s*(?:,\s*\{([^}]{0,1400})\})?\s*\)/gi)){
+      const method=/\bmethod\s*:\s*["'](GET|POST)["']/i.exec(call[2]||'')?.[1]||'GET';
+      record(call[1],method,[], 'fetch');
+    }
+    for(const call of body.matchAll(/\.load\s*\(\s*["']([^"']{1,230})["']/gi)){
+      record(call[1],'GET',[],'load');
+    }
+  }
+  return [...matches.values()].slice(0,30);
+}
+
 function arrayCandidates(html){
   const inputs=[];
   for(const m of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/json["'][^>]*>([\s\S]{0,200000}?)<\/script>/gi))inputs.push(decodeHtml(m[1]));
@@ -212,6 +271,7 @@ export function parseSeatLayout(html,source='enter'){
       htmlCharacters:html.length,
       scriptPaths:scriptPaths(html),
       candidateApiPaths:findSeatApiPaths(html),
+      requestHints:inspectSeatRequests(html),
       structure:pageStructure(html),
       hints:{
         hasSeatKeyword:/seat|좌석|자리/i.test(html),
