@@ -93,6 +93,25 @@ function seatFromElement(a){
   if(a['data-y'])obj.y=a['data-y'];
   return seatFromObject(obj);
 }
+function normalizeLooseJson(text){
+  // Parse a restricted JSON-like literal without eval or execution.
+  // Property names may be unquoted and simple strings may use single quotes.
+  if(typeof text!=='string'||text.length>200000||/\b(?:function|=>|\bnew\b|\bimport\b|\bawait\b)\b/.test(text))return null;
+  const quotedKeys=text.replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g,'$1"$2"$3');
+  const quotes=quotedKeys.replace(/'([^'\\]{0,300})'/g,(_,value)=>JSON.stringify(value));
+  try{return JSON.parse(quotes)}catch{return null}
+}
+export function findSeatApiPaths(source){
+  if(typeof source!=='string'||source.length>MAX_HTML)return [];
+  const found=[];
+  for(const m of source.matchAll(/(?:["'\x60])((?:https:\/\/m\.ssamcafe\.com)?\/(?:mobile|api)\/[A-Za-z0-9_./-]{1,160}\.do)(?:["'\x60])/gi)){
+    const path=m[1].replace(/^https:\/\/m\.ssamcafe\.com/i,'');
+    if(!/seat|chart|floor|자리|좌석|booking/i.test(path)||/change|cancel|reserve|register|enter|exit|pay|modify|update|insert|delete|save/i.test(path))continue;
+    if(!found.includes(path))found.push(path);
+    if(found.length>=16)break;
+  }
+  return found;
+}
 function arrayCandidates(html){
   const inputs=[];
   for(const m of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/json["'][^>]*>([\s\S]{0,200000}?)<\/script>/gi))inputs.push(decodeHtml(m[1]));
@@ -119,7 +138,8 @@ function extractHtmlSeatRecords(html){
     if(out.length>=MAX_SEATS*2)break;
   }
   for(const candidate of arrayCandidates(html)){
-    try{collectObjects(JSON.parse(candidate),out);}catch{}
+    try{collectObjects(JSON.parse(candidate),out);}
+    catch{const parsed=normalizeLooseJson(candidate);if(parsed)collectObjects(parsed,out);}
   }
   return out;
 }
@@ -154,6 +174,7 @@ export function parseSeatLayout(html,source='enter'){
     inspect:{
       htmlCharacters:html.length,
       scriptPaths:scriptPaths(html),
+      candidateApiPaths:findSeatApiPaths(html),
       hints:{
         hasSeatKeyword:/seat|좌석|자리/i.test(html),
         hasWebviewData:/chart|canvas|floor/i.test(html),
