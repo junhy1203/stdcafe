@@ -355,6 +355,32 @@ export function analyzeSeatDocument(raw,mime=''){
   };
 }
 
+
+export function analyzeSeatScript(source){
+  if(typeof source!=='string'||source.length>MAX_HTML)return {invalid:true};
+  const code=source;
+  const count=regex=>[...code.matchAll(regex)].length;
+  const functions=[...new Set([...code.matchAll(/\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]{1,48})\s*\(/g)]
+    .map(m=>m[1]).filter(x=>!/password|token|auth|secret|member|account|user|email|phone|cookie/i.test(x)))].slice(0,36);
+  const hints=inspectSeatRequests('<script>'+code.replace(/<\/script/gi,'')+'</script>');
+  return {
+    characters:code.length,lines:code.split('\n').length,
+    likelyMinified:code.length>5000&&code.split('\n').length<10,
+    operations:{
+      ajax:count(/\$\.ajax\s*\(/g),
+      jqueryGet:count(/\$\.get\s*\(/g),jqueryPost:count(/\$\.post\s*\(/g),
+      fetch:count(/\bfetch\s*\(/g),xhr:count(/XMLHttpRequest/g),
+      jqueryLoad:count(/\.load\s*\(/g),
+      seatTerms:count(/seat|chair|좌석/gi),chartTerms:count(/\bchart\b|배치도/gi),
+      floorTerms:count(/floor|층\s*선택/gi),
+      htmlInsertion:count(/\.html\s*\(|\.append\s*\(|innerHTML/g)
+    },
+    candidates:findSeatApiPaths(code),
+    requestHints:hints,
+    functionNames:functions
+  };
+}
+
 function arrayCandidates(html){
   const inputs=[];
   for(const m of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/json["'][^>]*>([\s\S]{0,200000}?)<\/script>/gi))inputs.push(decodeHtml(m[1]));
