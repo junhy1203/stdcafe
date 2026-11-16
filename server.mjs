@@ -14,7 +14,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
 const NATIVE_WEBVIEW_UA='Mozilla/5.0 (Linux; Android 13; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/118.0.0.0 Mobile Safari/537.36';
-const APP_VERSION = '2026-11-16-native-seat-markers-v15';
+const APP_VERSION = '2026-11-16-dual-room-view-v16';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -447,11 +447,19 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           if(String(home.rspcode??'')!=='0000')
             return response(res,200,{ok:false,source:'app-home',seats:[],reason:'앱 홈에서 현재 매장 정보를 조회할 수 없습니다.'});
           const shopNo=readable(home.home_shop_no,40);
-          const floorNo=readable(home.home_floor_no,40);
+          const detectedFloor=readable(home.home_floor_no,40);
+          // Display both native seating tabs as read-only information,
+          // independent of the user's ticket type.
+          const requestedFloor=new URL(req.url??'','http://localhost').searchParams.get('floor');
+          if(requestedFloor!==null&&!/^[1-9][0-9]?$/.test(requestedFloor))
+            throw createError(400,'좌석 구역 선택값이 올바르지 않습니다.');
+          const floorNo=requestedFloor||detectedFloor;
           if(!/^[0-9A-Za-z_-]{1,40}$/.test(shopNo))
             return response(res,200,{ok:false,source:'app-home',seats:[],reason:'현재 매장번호가 없어 좌석 조회 화면을 특정할 수 없습니다.'});
           const validFloor=/^[0-9A-Za-z_-]{1,40}$/.test(floorNo);
           const diagnosticContext={
+            floorSource:requestedFloor?'user-selected-room-tab':'home-api',
+            passFiltered:false,
             hasShopNo:true,hasFloorNo:validFloor,
             observedCookieCount:s.jar.size,
             clientType:'Android WebView request emulation',
