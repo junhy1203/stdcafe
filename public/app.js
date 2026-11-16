@@ -601,6 +601,8 @@ function safeSeatDiagnostic(data){
     structure:a.structure||null,
     hints:a.hints||null,
     seatsFound:a.summary?.count??0,
+    http:a.http||null,
+    forensic:a.forensic||null,
     requestHints:Array.isArray(a.requestHints)?a.requestHints.map(h=>({
       path:h.path||'',method:h.method||'UNKNOWN',fields:h.fields||[],source:h.source||''
     })):[]
@@ -614,13 +616,15 @@ function safeSeatDiagnostic(data){
       source:page?.source||null,
       summary:page?.summary||null,
       attemptedPages:Array.isArray(page?.attempts)?page.attempts.map(attempt):[],
-      loadedJsPaths:Array.isArray(page?.detectedScripts)?page.detectedScripts.slice(0,16):[],
-      seatReadApiCandidates:Array.isArray(page?.detectedReadApis)?page.detectedReadApis.slice(0,16):[],
-      requestHints:Array.isArray(page?.requestHints)?page.requestHints.slice(0,24):[],
+      loadedJsPaths:Array.isArray(page?.detectedScripts)?page.detectedScripts.slice(0,40):[],
+      allDiscoveredJsPaths:Array.isArray(page?.discoveredScripts)?page.discoveredScripts.slice(0,60):[],
+      seatReadApiCandidates:Array.isArray(page?.detectedReadApis)?page.detectedReadApis.slice(0,32):[],
+      requestHints:Array.isArray(page?.requestHints)?page.requestHints.slice(0,80):[],
       jsAnalysis:Array.isArray(page?.inspected)?page.inspected.map(x=>({
-        path:x.path||'',candidatePaths:x.candidates||[],error:x.error||''
+        path:x.path||'',candidatePaths:x.candidates||[],error:x.error||'',
+        http:x.http||null,code:x.code||null
       })):[],
-      attemptedReadApis:Array.isArray(page?.probes)?page.probes.slice(0,8):[]
+      attemptedReadApis:Array.isArray(page?.probes)?page.probes.slice(0,24):[]
     }
   };
 }
