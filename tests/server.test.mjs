@@ -1103,3 +1103,24 @@ test('API accepts explicitly chosen seat zone independently of home floor',async
     assert.equal(bad.status,400);
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+test('native layout diagnostics capture sanitized CSS paths and numeric geometry',async()=>{
+  const {inspectNativeRoomLayout,parseSeatLayout}=await import('../seat-map.mjs');
+  const secret='PRIVATE_LOGIN_COOKIE_OR_TOKEN';
+  const html='<html><head><link rel="stylesheet" href="/css/seat-plan.css?tk='+secret+'">'+
+    '<style>.seat{position:absolute;left:10px}.wrap-seat{background-image:url("/images/seat_plan.png")}</style></head>'+
+    '<body><div class="wrap-seat"><div class="seat" style="left:120px;top:27%;width:42px;height:30px" data-seat-no="12"></div>'+
+    '<div class="seat" style="left:180px;top:27%" data-seat-no="13"></div></div>'+
+    '<script>var seatNo_12=1;var seatNo_13=1;var seatNo_14=1;</script>'+
+    '<span data-token="'+secret+'"></span></body></html>';
+  const report=inspectNativeRoomLayout(html);
+  assert.ok(report.stylesheets.includes('/css/seat-plan.css'));
+  assert.ok(report.imageAssetPaths.includes('/images/seat_plan.png'));
+  assert.equal(report.seatElements,2);
+  assert.equal(report.seatElementsWithGeometry,2);
+  assert.equal(report.examplesWithGeometry[0].x.value,120);
+  assert.equal(report.examplesWithGeometry[0].y.unit,'%');
+  assert.equal(report.inlineCss.containsBackgroundAsset,true);
+  assert.ok(!JSON.stringify(report).includes(secret));
+  assert.ok(parseSeatLayout(html,'enter').inspect.nativeLayout.stylesheets.includes('/css/seat-plan.css'));
+});
