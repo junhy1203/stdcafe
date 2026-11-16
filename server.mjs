@@ -509,7 +509,14 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                     checkedAt:new Date(now()).toISOString(),...diagnosticContext,shopIdentified:Boolean(readable(home.home_shop_name)),
                     floorNo,source:name,summary:parsed.summary,
                     detectedScripts:parsed.inspect.scriptPaths,
-                    attempts:attempts.map(a=>({name:a.name,summary:a.summary||null,source:a.inspect?.nativeMarkers||null}))
+                    attempts:attempts.map(a=>({
+                      name:a.name,summary:a.summary||null,
+                      nativeSeatMarkers:a.inspect?.nativeMarkers||null,
+                      nativeLayout:a.inspect?.nativeLayout||null,
+                      forensic:a.inspect?.forensic||null,
+                      structure:a.inspect?.structure||null,
+                      http:a.http||null,durationMs:a.durationMs??null
+                    }))
                   };
                   return response(res,200,{
                     ok:true,shopName:readable(home.home_shop_name),floorNo,
@@ -613,7 +620,17 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                 s.lastSeatDiagnostic={
                   checkedAt:new Date(now()).toISOString(),...diagnosticContext,shopIdentified:Boolean(readable(home.home_shop_name)),
                   floorNo,source:'app-seat-api',summary:result.summary,
-                  detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,inspected
+                  detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,inspected,
+                  attempts:attempts.map(a=>({
+                    name:a.name,error:a.error||'',summary:a.summary||null,
+                    nativeSeatMarkers:a.inspect?.nativeMarkers||null,
+                    nativeLayout:a.inspect?.nativeLayout||null,
+                    forensic:a.inspect?.forensic||null,
+                    structure:a.inspect?.structure||null,
+                    http:a.http||null,durationMs:a.durationMs??null,
+                    redirects:a.redirects||[],finalPath:a.finalPath||null
+                  })),
+                  probes
                 };
                 return response(res,200,{
                   ok:true,shopName:readable(home.home_shop_name),floorNo,
