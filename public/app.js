@@ -367,7 +367,16 @@ function showDiagnosticResult(data, sessionResponse){
     ];
     if(apiPaths.length)parts.push('후보 경로: '+apiPaths.join(', '));
     const tries=seatDiag.attempts||[];
-    for(const t of tries)parts.push(t.name+': '+(t.error||'좌석 '+(t.summary?.count??0)+'개'));
+    for(const t of tries){
+      const detail=[
+        t.name==='personal'?'개인석 조회 화면':t.name==='enter'?'입실 화면':t.name==='change'?'자리이동 화면':t.name,
+        t.error||'확인된 좌석 '+(t.summary?.count??0)+'개',
+        t.htmlCharacters!==null&&t.htmlCharacters!==undefined?'HTML '+t.htmlCharacters+'자':'',
+        t.redirects?.length?'화면 이동: '+t.redirects.join(' → '):'',
+        t.finalPath?'최종 경로: '+t.finalPath:''
+      ].filter(Boolean).join(' · ');
+      parts.push(detail);
+    }
     seatText.textContent=parts.join(' / ');
   }
   seatItem.append(seatHeading,seatText);parent.appendChild(seatItem);
