@@ -610,3 +610,22 @@ test('time-based pass converts remaining period 866 minutes to 14 hours 26 minut
     assert.match(data.live.remainingTimeInterpretation,/잠정/);
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+
+test('varied native seat markup and undocumented status remain conservative',async()=>{
+  const {parseSeatLayout,parseSeatResponse}=await import('../seat-map.mjs');
+  const html=parseSeatLayout(
+    '<div data-seat-no="1" data-use-yn="N" style="transform:translate(50px, 20px)"></div>'+
+    '<div data-seat-no="2" class="seat-occupied" style="left:80px;top:20px"></div>'+
+    '<div data-seat-no="3" data-seat-status="C" style="left:120px;top:50px"></div>'
+  );
+  assert.deepEqual(html.seats.map(x=>x.status),['available','occupied','unknown']);
+  assert.equal(html.seats[0].x,50);assert.equal(html.seats[0].y,20);
+  const list=parseSeatLayout("<script>window.seatList=[{no:'10',use_yn:'N',x:10,y:30},{no:'11',use_yn:'Y',x:40,y:30}]</script>");
+  assert.equal(list.seats.length,2);
+  assert.deepEqual(list.seats.map(x=>x.status),['available','occupied']);
+  const response=parseSeatResponse(JSON.stringify({result:{seatList:[{no:'12',USE_YN:'N',SEAT_POSITION_X:'18',SEAT_POSITION_Y:'22'}]}}));
+  assert.equal(response.seats[0].id,'12');
+  assert.equal(response.seats[0].status,'available');
+  assert.equal(response.seats[0].x,18);assert.equal(response.seats[0].y,22);
+});
