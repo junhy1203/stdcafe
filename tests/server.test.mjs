@@ -532,7 +532,7 @@ test('native WebView seat layout falls back without inventing seats when HTML on
     assert.equal(result.ok,false);
     assert.equal(result.seats.length,0);
     assert.ok(result.inspect.detectedScripts.includes('/assets/seatchart.js'));
-    assert.ok(result.reason.includes('별도 조회 API'));
+    assert.ok(result.reason.includes('좌석별')||result.reason.includes('개별 상태'));
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
 
