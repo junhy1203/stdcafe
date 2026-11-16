@@ -255,7 +255,7 @@ export function analyzeSeatDocument(raw,mime=''){
     }catch{}
   }
   // For non-HTML responses, record only length and classification.
-  if(!/<[a-z][\s>]/i.test(raw)){
+  if(!/<[a-z][\w:-]*[\s>]/i.test(raw)){
     return {...base,format:'text',markers:{
       containsJson:/"(?:seatList|seatData|SEAT_NO)"\s*:/i.test(raw),
       mentionsSeat:/seat|좌석/i.test(raw),
