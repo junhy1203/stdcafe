@@ -304,6 +304,40 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
     if (resp.status !== 200) throw createError(502, `쌤카페 서버가 HTTP ${resp.status}을 반환했습니다.`);
     return { resp, text: await limitedText(resp) };
   }
+  async function upstreamMobilePage(rawUrl, jar) {
+    // Follow only safe, same-origin GET redirects inside the mobile read-only
+    // pages; a WebView normally follows these, but our base client does not.
+    let url=new URL(rawUrl);
+    const redirects=[];
+    for(let hop=0;hop<=3;hop++){
+      if(url.origin!==UPSTREAM || !url.pathname.startsWith('/mobile/'))
+        throw createError(502,'모바일 화면이 다른 호스트 또는 허용되지 않은 경로로 이동했습니다.');
+      const headers={
+        Accept:'text/html,application/xhtml+xml',
+        'Accept-Language':'ko-KR,ko;q=0.9',
+        'User-Agent':'Mozilla/5.0 (Linux; Android 13; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/118.0.0.0 Mobile Safari/537.36'
+      };
+      const cookies=cookieHeader(jar);
+      if(cookies)headers.Cookie=cookies;
+      let resp;
+      try { resp=await fetchImpl(url,{method:'GET',headers,redirect:'manual',signal:AbortSignal.timeout(12000)}); }
+      catch { throw createError(502,'공식 모바일 좌석 화면에 연결하지 못했습니다.'); }
+      collectUpstreamCookies(resp.headers,jar);
+      if([301,302,303,307,308].includes(resp.status)){
+        const loc=resp.headers.get('location');
+        if(!loc)throw createError(502,'공식 모바일 화면에서 이동 주소를 받지 못했습니다.');
+        const next=new URL(loc,url);
+        if(next.origin!==UPSTREAM || !next.pathname.startsWith('/mobile/'))
+          throw createError(502,'모바일 화면이 다른 호스트 또는 허용되지 않은 경로로 이동했습니다.');
+        // No token or query string enters diagnostics.
+        redirects.push(next.pathname);
+        url=next;continue;
+      }
+      if(resp.status!==200)throw createError(502,'공식 모바일 좌석 화면 HTTP '+resp.status);
+      return {resp,text:await limitedText(resp),redirects,finalPath:url.pathname};
+    }
+    throw createError(502,'모바일 좌석 화면의 이동 횟수가 너무 많습니다.');
+  }
   async function handle(req, res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -415,11 +449,12 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             url.searchParams.set('SHOP_NO',shopNo);
             if(needsFloor)url.searchParams.set('FLOOR_NO',floorNo);
             try{
-              const remote=await upstream(url,{method:'GET',headers:{Accept:'text/html,application/xhtml+xml'}},s.jar);
+              const remote=await upstreamMobilePage(url,s.jar);
               const mime=remote.resp.headers.get('content-type')||'';
-              if(!/html/i.test(mime)){attempts.push({name,error:'HTML 형식이 아닌 응답'});continue;}
+              if(!/html/i.test(mime)){attempts.push({name,error:'HTML 형식이 아닌 응답',mime:mime.split(';')[0],redirects:remote.redirects});continue;}
               const parsed=parseSeatLayout(remote.text,name);
-              attempts.push({name,summary:parsed.summary,inspect:parsed.inspect});
+              attempts.push({name,summary:parsed.summary,inspect:parsed.inspect,
+                redirects:remote.redirects,finalPath:remote.finalPath});
               if(parsed.seats.length){
                 s.lastSeatDiagnostic={
                   checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
