@@ -12,7 +12,7 @@ DEST=/opt/ssamcafe-web
 
 [[ "$WG_IFACE" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo 'WG_IFACE 형식 오류' >&2; exit 1; }
 [[ "$PORT" =~ ^[0-9]{4,5}$ ]] && (( PORT >= 1024 && PORT <= 65535 )) || { echo 'PORT는 1024~65535 범위여야 합니다.' >&2; exit 1; }
-[[ -f "$DIR/server.mjs" && -f "$DIR/public/index.html" && -f "$DIR/public/vendor/qrcode.mjs" ]] || { echo '전체 프로젝트 파일 및 QR 생성 모듈(public/vendor/qrcode.mjs)이 필요합니다.' >&2; exit 1; }
+[[ -f "$DIR/server.mjs" && -f "$DIR/seat-map.mjs" && -f "$DIR/public/index.html" && -f "$DIR/public/vendor/qrcode.mjs" ]] || { echo '전체 프로젝트 파일 및 QR 생성 모듈(public/vendor/qrcode.mjs)이 필요합니다.' >&2; exit 1; }
 command -v ip >/dev/null || { echo 'ip 명령이 없습니다. iproute2 설치를 확인하세요.' >&2; exit 1; }
 ip link show dev "$WG_IFACE" >/dev/null 2>&1 || { echo "$WG_IFACE 인터페이스가 보이지 않습니다. WireGuard가 실행 중인지 확인하세요." >&2; exit 1; }
 WG_IP="$(ip -o -4 addr show dev "$WG_IFACE" | awk '{print $4}' | cut -d/ -f1 | head -n1)"
@@ -31,7 +31,7 @@ if ! id -u ssamweb >/dev/null 2>&1; then
   useradd --system --home-dir "$DEST" --shell /usr/sbin/nologin ssamweb
 fi
 install -d -m 0755 -o root -g root "$DEST" "$DEST/public" "$DEST/public/vendor"
-install -m 0644 -o root -g root "$DIR/server.mjs" "$DIR/package.json" "$DEST/"
+install -m 0644 -o root -g root "$DIR/server.mjs" "$DIR/seat-map.mjs" "$DIR/package.json" "$DEST/"
 for f in index.html app.js style.css manifest.webmanifest sample-data.json; do
   install -m 0644 -o root -g root "$DIR/public/$f" "$DEST/public/$f"
 done
