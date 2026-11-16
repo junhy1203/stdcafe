@@ -418,7 +418,7 @@ test('entry, availability and QR elements exist in browser shell',async()=>{
     assert.ok(html.includes('id="'+id+'"'),'Missing HTML element '+id);
     assert.ok(js.includes("'"+id+"'"),'Missing JS reference '+id);
   }
-  assert.ok(html.includes('app.js?v=20261116-native-seat-markers-v15'),'cache-version not updated');
+  assert.ok(html.includes('app.js?v=20261116-dual-room-view-v16'),'cache-version not updated');
 });
 
 test('QR ES module is deployed and served with the right MIME type',async()=>{
@@ -1053,4 +1053,53 @@ test('only directly applied known classes yield verified seat status',async()=>{
   assert.ok(effects.patterns.some(x=>x.cssProps.includes('background-color')));
   const report=JSON.stringify(effects);
   assert.ok(!report.includes('<script>'));
+});
+
+
+test('both native seat room tabs can be inspected regardless of pass type',async()=>{
+  const html=await (await import('node:fs/promises')).readFile(new URL('../public/index.html',import.meta.url),'utf8');
+  const js=await (await import('node:fs/promises')).readFile(new URL('../public/app.js',import.meta.url),'utf8');
+  assert.ok(html.includes('data-seat-zone="1"'));
+  assert.ok(html.includes('data-seat-zone="2"'));
+  assert.ok(js.includes("'/api/seat-layout?floor='+encodeURIComponent(selectedSeatZone)"));
+  assert.ok(!js.includes('passType===selectedSeatZone'));
+});
+test('API accepts explicitly chosen seat zone independently of home floor',async()=>{
+  const seen=[];
+  const mock=async(url,options)=>{
+    const u=new URL(url);seen.push({path:u.pathname,floor:u.searchParams.get('FLOOR_NO')});
+    if(u.pathname==='/api/app.do'){
+      const cmd=JSON.parse(options.body).cmd;
+      if(cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'PRIVATE_TOKEN'}}),'application/json');
+      if(cmd==='1100')return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'89',home_floor_no:'1',home_shop_tot_p:174,home_shop_use_p:70}}),'application/json');
+    }
+    if(u.pathname==='/mobile/purchase/personal.do')return mkResponse('<html><script>var chart="/mobile/purchase/chart.do";</script></html>','text/html');
+    if(u.pathname==='/mobile/enterSeatView.do'){
+      if(u.searchParams.get('FLOOR_NO')==='2')return mkResponse('<html><div class="wrap-seat"></div><script>var seatNo_157=1;</script><script>var seatNo_158=1;</script><script>var seatNo_159=1;</script></html>','text/html');
+      return mkResponse('<html><div class="wrap-seat"></div><script>var seatNo_1=1;</script><script>var seatNo_2=1;</script><script>var seatNo_3=1;</script></html>','text/html');
+    }
+    if(u.pathname==='/mobile/seatChangeView.do')return mkResponse('<html></html>','text/html');
+    if(u.pathname==='/mobile/purchase/chart.do')return mkResponse('<html><p>select floor</p></html>','text/html');
+    throw Error('unexpected upstream read '+u.pathname);
+  };
+  const server=createApp({fetchImpl:mock});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const init=await fetch(base+'/api/session'),csrf=(await init.json()).csrf,Cookie=init.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'example',password:'example'})});
+    assert.equal(login.status,200);
+    const response=await fetch(base+'/api/seat-layout?floor=2',{headers:{Cookie}});
+    const result=await response.json();
+    assert.equal(response.status,200);
+    assert.equal(result.ok,true);
+    assert.equal(result.floorNo,'2');
+    assert.ok(result.seats.some(x=>x.id==='157'));
+    assert.ok(!result.seats.some(x=>x.id==='1'));
+    assert.ok(result.seats.every(x=>x.status==='unknown'));
+    assert.ok(seen.some(x=>x.path==='/mobile/enterSeatView.do'&&x.floor==='2'));
+    assert.ok(!seen.some(x=>x.path==='/mobile/enterSeatView.do'&&x.floor==='1'));
+    const bad=await fetch(base+'/api/seat-layout?floor=not-a-floor',{headers:{Cookie}});
+    assert.equal(bad.status,400);
+  }finally{await new Promise(resolve=>server.close(resolve))}
 });
