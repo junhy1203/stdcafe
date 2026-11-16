@@ -557,18 +557,29 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             try{
               const remote=await upstream(url,{
                 method,
-                headers:{Accept:'application/json,text/html',...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded'}:{})},
+                headers:{
+                  Accept:'application/json,text/html',
+                  Referer:UPSTREAM+'/mobile/purchase/personal.do',
+                  ...(confirmedAjax.length?{'X-Requested-With':'XMLHttpRequest'}:{}),
+                  ...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded',Origin:UPSTREAM}:{})
+                },
                 ...(method==='POST'?{body:params.toString()}:{})
               },s.jar);
               const result=parseSeatResponse(remote.text,'app-seat-api');
               const type=remote.resp.headers.get('content-type')?.split(';')[0]||'unknown';
-              probes.push({path:p,method,status:remote.resp.status,mime:type,count:result.summary.count,
-                responseCharacters:remote.text.length,reportedMethod:matchedHints.map(h=>h.method)});
+              probes.push({
+                path:p,method,evidence,
+                requestedFieldNames:method==='POST'?[...params.keys()]:[...url.searchParams.keys()],
+                sourceHints:matchedHints,
+                http:seatHttpMetadata(remote.resp,remote.text),
+                count:result.summary.count,
+                responseAnalysis:result.inspect?.forensic||analyzeSeatDocument(remote.text,type)
+              });
               if(result.seats.length){
                 s.lastSeatDiagnostic={
                   checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
                   floorNo,source:'app-seat-api',summary:result.summary,
-                  detectedScripts:scripts,detectedReadApis:lookupPaths,requestHints,inspected
+                  detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,inspected
                 };
                 return response(res,200,{
                   ok:true,shopName:readable(home.home_shop_name),floorNo,
@@ -576,19 +587,33 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                   note:result.actualPositions?'공식 API 좌표로 표시':'실제 좌석 상태를 배열한 그림입니다(물리적인 배치는 아님).'
                 });
               }
-             }catch(e){probes.push({path:p,method,error:e.status?'HTTP '+e.status:'응답 확인 실패'});}
+             }catch(e){
+              const upstreamStatus=/\bHTTP\s+(\d{3})/.exec(String(e.message||''))?.[1]||null;
+              probes.push({
+                path:p,method,evidence,error:e.status?'공식 서버 HTTP 응답 오류':'응답 확인 실패',
+                upstreamHttpStatus:upstreamStatus?Number(upstreamStatus):null,
+                requestedFieldNames:method==='POST'?[...params.keys()]:[...url.searchParams.keys()]
+              });
+            }
           }
           s.lastSeatDiagnostic={
             checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
-            floorNo,source:null,detectedScripts:scripts,detectedReadApis:lookupPaths,requestHints,
+            floorNo,source:null,detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,
             inspected,probes,
-            attempts:attempts.map(a=>({name:a.name,error:a.error||'',summary:a.summary||null,hints:a.inspect?.hints||null,requestHints:a.inspect?.requestHints||[],structure:a.inspect?.structure||null,redirects:a.redirects||[],finalPath:a.finalPath||null,htmlCharacters:a.inspect?.htmlCharacters??null}))
+            attempts:attempts.map(a=>({
+              name:a.name,error:a.error||'',summary:a.summary||null,
+              hints:a.inspect?.hints||null,requestHints:a.inspect?.requestHints||[],
+              structure:a.inspect?.structure||null,
+              forensic:a.inspect?.forensic||null,http:a.http||null,
+              redirects:a.redirects||[],finalPath:a.finalPath||null,
+              htmlCharacters:a.inspect?.htmlCharacters??null
+            }))
           };
           return response(res,200,{
             ok:false,shopName:readable(home.home_shop_name),floorNo,seats:[],
             reason:'공식 좌석 화면과 읽기 전용 추가 API에서 좌석별 번호·상태를 확인하지 못했습니다. 좌석총계는 정상이며, 개별 상태는 추정하지 않습니다.',
             inspect:{attempts:s.lastSeatDiagnostic.attempts,detectedScripts:scripts,
-              detectedReadApis:lookupPaths,requestHints,inspected,probes}
+              detectedReadApis:lookupPaths,discoveredScripts:allScripts,requestHints,inspected,probes}
           });
         }
         if (pathname === '/api/entry-qr' && req.method === 'GET') {
