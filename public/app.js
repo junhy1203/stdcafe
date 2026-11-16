@@ -602,6 +602,9 @@ function safeSeatDiagnostic(data){
     hints:a.hints||null,
     seatsFound:a.summary?.count??0,
     http:a.http||null,
+    durationMs:a.durationMs??null,
+    requestMethod:a.requestMethod||null,
+    requestFieldNames:a.requestFieldNames||[],
     forensic:a.forensic||null,
     requestHints:Array.isArray(a.requestHints)?a.requestHints.map(h=>({
       path:h.path||'',method:h.method||'UNKNOWN',fields:h.fields||[],source:h.source||''
@@ -613,6 +616,14 @@ function safeSeatDiagnostic(data){
     seat:{
       checkedAt:page?.checkedAt||null,
       floorNo:page?.floorNo||null,
+      requestContext:{
+        hasShopNo:!!page?.hasShopNo,
+        hasFloorNo:!!page?.hasFloorNo,
+        appCookieCount:page?.observedCookieCount??null,
+        upstreamClient:page?.clientType||null,
+        homeResponseKeys:page?.homeResponseKeys||[],
+        aggregateSeatCounts:page?.expectedSeatCounts||null
+      },
       source:page?.source||null,
       summary:page?.summary||null,
       attemptedPages:Array.isArray(page?.attempts)?page.attempts.map(attempt):[],
@@ -622,6 +633,7 @@ function safeSeatDiagnostic(data){
       requestHints:Array.isArray(page?.requestHints)?page.requestHints.slice(0,80):[],
       jsAnalysis:Array.isArray(page?.inspected)?page.inspected.map(x=>({
         path:x.path||'',candidatePaths:x.candidates||[],error:x.error||'',
+        durationMs:x.durationMs??null,
         http:x.http||null,code:x.code||null
       })):[],
       attemptedReadApis:Array.isArray(page?.probes)?page.probes.slice(0,24):[]
