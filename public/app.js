@@ -23,6 +23,7 @@ const emptyData = {
 let state = {data:emptyData, origin:'unlinked', endpoint:null, selectedSeat:null, currentView:'home'};
 let csrfToken = '';
 let liveAuthenticated = false;
+let liveAvailability = null;
 const $ = id => document.getElementById(id);
 let toastTimer;
 function toast(message) {
@@ -74,11 +75,15 @@ function render(){
   setText('my-seat-status',d.member.seat==='—'?'좌석 미지정':'현재 좌석 정보');
   setText('time-left',minutesText(t.remainingMinutes));setText('ticket-name',t.name);
   $('time-progress').style.width=ratio+'%';
-  setText('available-count',seats.length?`${nAvailable}석`:'—');setText('available-detail',seats.length?`전체 ${seats.length}석 중 이용 가능`:'좌석 상태 정보 미확인');
+  const aggregate=(state.origin==='live' && liveAvailability)?liveAvailability.personal:null;
+  const knownFree=aggregate && Number.isInteger(aggregate.available)?aggregate.available:null;
+  setText('available-count',knownFree!==null?knownFree+'석':seats.length?nAvailable+'석':'—');
+  setText('available-detail',knownFree!==null?'개인석 전체 '+aggregate.total+'석 · 이용 중 '+aggregate.used+'석':seats.length?'전체 '+seats.length+'석 중 이용 가능':'좌석별 이용 현황 미확인');
   setText('map-summary',seats.length?`전체 ${seats.length}석 · 이용 가능 ${nAvailable}석`:'개별 좌석 상태를 서버 응답에서 확인하지 못했습니다.');
   setText('store-name',d.store.name);setText('store-address',d.store.address);
   setText('last-update',state.origin==='demo'?'예시':safeDate(d.updatedAt));
-  setText('seat-available-total',nAvailable);setText('seat-occupied-total',nOccupied);
+  setText('seat-available-total',knownFree!==null?knownFree:seats.length?nAvailable:'—');
+  setText('seat-occupied-total',aggregate&&Number.isInteger(aggregate.used)?aggregate.used:seats.length?nOccupied:'—');
   setText('seats-store-name',d.store.name);
   setText('pass-title',t.name);setText('pass-left',minutesText(t.remainingMinutes));setText('pass-total',minutesText(t.totalMinutes));
   $('pass-bar').style.width=ratio+'%';setText('pass-store',d.store.name);
@@ -100,7 +105,30 @@ function render(){
   const strong=document.createElement('strong');strong.textContent=view[1];
   notice.append(strong,document.createTextNode(' '+view[2]));
   buildSeats('seat-map-home');buildSeats('seat-map-full');
+  renderAvailabilityCounters();
 }
+
+function renderAvailabilityCounters(){
+  const parent=$('availability-counters');if(!parent)return;
+  parent.replaceChildren();
+  const groups=[['personal','개인석'],['group','스터디룸'],['locker','사물함']];
+  for(const [key,label] of groups){
+    const item=document.createElement('div');item.className='availability-counter';
+    const title=document.createElement('strong');title.textContent=label;
+    const a=liveAvailability?.[key];
+    const quantity=document.createElement('div');quantity.className='availability-number';
+    quantity.textContent=state.origin==='live'&&Number.isInteger(a?.available)?a.available+'개 이용 가능':'—';
+    const detail=document.createElement('p');
+    detail.textContent=state.origin==='live'&&Number.isInteger(a?.total)&&Number.isInteger(a?.used)
+      ?'전체 '+a.total+'개 · 사용 중 '+a.used+'개'
+      :'앱 홈에서 집계값을 확인하지 못했습니다.';
+    item.append(title,quantity,detail);parent.append(item);
+  }
+  setText('seat-count-source',state.origin==='live'&&liveAvailability?.confirmedShop
+    ?'현재 연동 매장 · 앱 홈에서 조회한 집계 ('+safeDate(liveAvailability.fetchedAt)+')'
+    :'매장 및 현재 좌석 집계 확인 필요 · 개별 좌석 번호는 아직 미지원');
+}
+
 function navigate(target){
   if(!['home','seats','tickets','diagnostics'].includes(target))return;
   state.currentView=target;
@@ -120,7 +148,7 @@ for(const id of ['settings','settings-nav','connect-cta']) $(id).addEventListene
 for(const id of ['close-modal','dismiss-modal']) $(id).addEventListener('click',hideModal);
 $('modal-overlay').addEventListener('click',e=>{if(e.target===$('modal-overlay'))hideModal();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')hideModal();});
-$('restore-demo').addEventListener('click',()=>{state={...state,data:demo,origin:'demo',selectedSeat:null,endpoint:null};$('endpoint-url').value='';render();hideModal();toast('예시 데이터로 돌아왔습니다.');});
+$('restore-demo').addEventListener('click',()=>{liveAvailability=null;state={...state,data:demo,origin:'demo',selectedSeat:null,endpoint:null};$('endpoint-url').value='';render();hideModal();toast('예시 데이터로 돌아왔습니다.');});
 $('data-file').addEventListener('change', async e=>{
   const f=e.target.files?.[0];if(!f)return;
   if(f.size>1_000_000){modalError('파일은 1MB 이하만 지원합니다.');return;}
@@ -405,10 +433,12 @@ async function fetchLive(){
   if(!liveAuthenticated){bridgeError('먼저 로그인해 주세요.');return false;}
   const btn=$('refresh');btn.disabled=true;bridgeStatus('쌤카페 서버의 4개 회원 페이지 조회 중…');lookupSummary('로그인 성공 · 실제 회원 페이지 4개를 조회하고 있습니다…');clearBridgeError();
   // Clear stale/demo values before the request, including after a page reload.
+  liveAvailability=null;
   state.data=normalize(liveBlank());state.origin='live';state.endpoint=null;state.selectedSeat=null;render();
   try{
     const received=await requestJson('/api/status');
     state.data=normalize(received);
+    liveAvailability=received.live?.seatAvailability||null;
     const sources=received.live?.sources||{};
     showLiveSources(sources);
     renderStructured(received.live);
@@ -443,6 +473,7 @@ async function fetchLive(){
     toast('실제 앱 데이터 '+apiCount+'/2개 API 조회 · 확인된 항목만 반영');
     return true;
   }catch(err){
+    liveAvailability=null;
     state.data=normalize(liveBlank());state.origin='error';render();clearLiveSources();
     bridgeError(`실시간 조회 실패: ${err.message}`);
     bridgeStatus('로그인 성공 · 서버 조회 오류');
@@ -451,6 +482,63 @@ async function fetchLive(){
     return false;
   }finally{btn.disabled=false;}
 }
+
+const QR_NS='http://www.w3.org/2000/svg';
+function closeEntry(){
+  $('entry-overlay').hidden=true;
+  $('entry-qr-canvas').replaceChildren();
+  setText('entry-status','입장 QR을 닫았습니다. 다시 열면 공식 서버에서 새로 조회합니다.');
+}
+async function refreshEntryQr(){
+  const btn=$('entry-reload');btn.disabled=true;
+  $('entry-qr-canvas').replaceChildren();
+  setText('entry-status','현재 본인 계정의 쌤카페 공식 입장 QR을 조회하고 있습니다…');
+  try{
+    const data=await requestJson('/api/entry-qr');
+    if(typeof data.qr!=='string' || data.qr.length<1)throw Error('서버에서 유효한 QR 값을 받지 못했습니다.');
+    // MIT licensed, bundled locally: no QR data sent to an external generator.
+    const qrLib=await import('/vendor/qrcode.mjs');
+    const qr=qrLib.default(0,'M');
+    qr.addData(data.qr,'Byte');qr.make();
+    const total=qr.getModuleCount(),pad=4;
+    const svg=document.createElementNS(QR_NS,'svg');
+    svg.setAttribute('viewBox','0 0 '+(total+pad*2)+' '+(total+pad*2));
+    svg.setAttribute('role','img');svg.setAttribute('aria-label','매장 스캐너에 제시할 공식 쌤카페 입장 QR');
+    const white=document.createElementNS(QR_NS,'rect');
+    white.setAttribute('x','0');white.setAttribute('y','0');
+    white.setAttribute('width',String(total+pad*2));white.setAttribute('height',String(total+pad*2));
+    white.setAttribute('fill','#ffffff');svg.append(white);
+    const dots=document.createDocumentFragment();
+    for(let r=0;r<total;r++)for(let c=0;c<total;c++)if(qr.isDark(r,c)){
+      const pixel=document.createElementNS(QR_NS,'rect');
+      pixel.setAttribute('x',String(c+pad));pixel.setAttribute('y',String(r+pad));
+      pixel.setAttribute('width','1');pixel.setAttribute('height','1');pixel.setAttribute('fill','#111111');
+      dots.append(pixel);
+    }
+    svg.append(dots);
+    $('entry-qr-canvas').replaceChildren(svg);
+    setText('entry-status',data.shopName
+      ?data.shopName+' · 공식 앱 홈의 QR을 표시했습니다. 현장 스캐너에 제시해 주세요.'
+      :'공식 앱 홈의 QR을 표시했습니다. 현장 스캐너에 제시해 주세요.');
+  }catch(err){
+    setText('entry-status','입장 QR을 표시하지 못했습니다: '+err.message);
+  }finally{btn.disabled=false;}
+}
+async function openEntry(){
+  if(!liveAuthenticated){toast('설정에서 쌤카페 계정으로 먼저 로그인해 주세요.');showModal();return;}
+  $('entry-overlay').hidden=false;
+  await refreshEntryQr();
+}
+for(const id of ['entry-open-home','entry-open-seats'])$(id).addEventListener('click',openEntry);
+for(const id of ['entry-close','entry-dismiss'])$(id).addEventListener('click',closeEntry);
+$('entry-reload').addEventListener('click',refreshEntryQr);
+$('entry-overlay').addEventListener('click',e=>{if(e.target===$('entry-overlay'))closeEntry();});
+$('availability-refresh').addEventListener('click',async()=>{
+  if(!liveAuthenticated){toast('먼저 로그인해 주세요.');showModal();return;}
+  $('availability-refresh').disabled=true;
+  try{await fetchLive();}finally{$('availability-refresh').disabled=false;}
+});
+
 $('bridge-login-form').addEventListener('submit',async(e)=>{
   e.preventDefault();clearBridgeError();
   if(!csrfToken){bridgeError('먼저 개인용 서버를 실행해 주세요.');return;}
@@ -498,6 +586,7 @@ $('bridge-login-form').addEventListener('submit',async(e)=>{
 $('bridge-logout').addEventListener('click',async()=>{
   try{await requestJson('/api/logout',{method:'POST',headers:{'X-CSRF-Token':csrfToken}});
     liveAuthenticated=false;$('bridge-logout').hidden=true;bridgeStatus('로그아웃 완료');
+    liveAvailability=null;
     state.data=normalize(liveBlank());state.origin='unlinked';render();clearLiveSources();lookupSummary('로그아웃됨 · 회원 데이터 없음');toast('로그아웃했습니다.');
   }catch(err){bridgeError(err.message);}
 });
