@@ -349,6 +349,28 @@ function showDiagnosticResult(data, sessionResponse){
   setText('diagnostics-loaded',last?.summary ? String(last.summary.pagesLoaded)+'/4개' : '조회 기록 없음');
   setText('diagnostics-time',last?.checkedAt?safeDate(last.checkedAt):'—');
   const parent=$('diagnostics-pages');parent.replaceChildren();
+  const seatDiag=data.seatPage;
+  const seatItem=document.createElement('div');seatItem.className='diagnostics-page-item';
+  const seatHeading=document.createElement('strong');seatHeading.textContent='개별 좌석 화면 / 추가 API 분석';
+  const seatText=document.createElement('span');
+  if(!seatDiag){
+    seatText.textContent='아직 개별 좌석 화면을 조회하지 않았습니다. 좌석 현황 → 개별 좌석 상태 조회를 눌러 주세요.';
+  }else{
+    const summary=seatDiag.summary;
+    const apiPaths=seatDiag.detectedReadApis||[];
+    const scripts=seatDiag.detectedScripts||[];
+    const parts=[
+      '매장 좌석 화면: '+(seatDiag.source||'개별 데이터 미확인'),
+      summary?'좌석번호 '+summary.count+'개 · 이용 가능 '+summary.available+'개 · 사용 중 '+summary.occupied+'개':'좌석별 데이터 없음',
+      '공식 페이지 JS '+scripts.length+'개',
+      '좌석 관련 읽기 전용 API 후보 '+apiPaths.length+'개'
+    ];
+    if(apiPaths.length)parts.push('후보 경로: '+apiPaths.join(', '));
+    const tries=seatDiag.attempts||[];
+    for(const t of tries)parts.push(t.name+': '+(t.error||'좌석 '+(t.summary?.count??0)+'개'));
+    seatText.textContent=parts.join(' / ');
+  }
+  seatItem.append(seatHeading,seatText);parent.appendChild(seatItem);
   const loginItem=document.createElement('div');loginItem.className='diagnostics-page-item';
   const loginTitle=document.createElement('strong');loginTitle.textContent='최근 로그인 시도';
   const loginText=document.createElement('span');loginText.textContent=loginTraceText(data.lastLogin);
