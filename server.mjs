@@ -631,6 +631,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               name:a.name,error:a.error||'',summary:a.summary||null,
               hints:a.inspect?.hints||null,requestHints:a.inspect?.requestHints||[],
               structure:a.inspect?.structure||null,
+              nativeSeatMarkers:a.inspect?.nativeMarkers||null,
               forensic:a.inspect?.forensic||null,http:a.http||null,durationMs:a.durationMs??null,
               requestMethod:a.requestMethod||'GET',requestFieldNames:a.requestFieldNames||[],
               redirects:a.redirects||[],finalPath:a.finalPath||null,
