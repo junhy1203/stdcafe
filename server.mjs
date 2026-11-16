@@ -8,7 +8,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import {parseSeatLayout} from './seat-map.mjs';
+import {parseSeatLayout,parseSeatResponse,findSeatApiPaths} from './seat-map.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -427,15 +427,60 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               attempts.push({name,error:e.status?'공식 웹페이지 조회 오류':'HTML 구조 또는 응답을 분석할 수 없음'});
             }
           }
+          // If the WebView only renders a JavaScript shell, discover the seat
+          // *read* requests used by its own scripts. Never execute upstream JS.
+          const scripts=[...new Set(attempts.flatMap(a=>a.inspect?.scriptPaths||[]))]
+            .filter(p=>p.startsWith('/')&&!p.includes('..')&&/\.m?js$/i.test(p))
+            .sort((a,b)=>Number(/seat|chart|floor/i.test(b))-Number(/seat|chart|floor/i.test(a)))
+            .slice(0,6);
+          const discovered=[...new Set(attempts.flatMap(a=>a.inspect?.candidateApiPaths||[]))];
+          const inspected=[];
+          await Promise.all(scripts.map(async p=>{
+            try{
+              const url=new URL(p,UPSTREAM);
+              if(url.origin!==UPSTREAM)return;
+              const remote=await upstream(url,{method:'GET',headers:{Accept:'text/javascript,application/javascript'}},s.jar);
+              const candidates=findSeatApiPaths(remote.text);
+              inspected.push({path:p,candidates});
+              for(const candidate of candidates)discovered.push(candidate);
+            }catch{inspected.push({path:p,error:'JavaScript 파일 조회 불가'});}
+          }));
+          const lookupPaths=[...new Set(discovered)].slice(0,3);
+          const probes=[];
+          for(const p of lookupPaths){
+            const url=new URL(p,UPSTREAM);
+            if(url.origin!==UPSTREAM||!url.pathname.startsWith('/mobile/')&&!url.pathname.startsWith('/api/'))continue;
+            for(const [k,v] of [['tk',s.token],['m_value',s.device],['SHOP_NO',shopNo],['FLOOR_NO',floorNo]])url.searchParams.set(k,v);
+            try{
+              // GET-only and read-only allowlist; no mutation or guessed POST payload.
+              const remote=await upstream(url,{method:'GET',headers:{Accept:'application/json,text/html'}},s.jar);
+              const result=parseSeatResponse(remote.text,'app-seat-api');
+              probes.push({path:p,count:result.summary.count});
+              if(result.seats.length){
+                s.lastSeatDiagnostic={
+                  checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
+                  floorNo,source:'app-seat-api',summary:result.summary,
+                  detectedScripts:scripts,detectedReadApis:lookupPaths,inspected
+                };
+                return response(res,200,{
+                  ok:true,shopName:readable(home.home_shop_name),floorNo,
+                  ...result,
+                  note:result.actualPositions?'공식 API 좌표로 표시':'실제 좌석 상태를 배열한 그림입니다(물리적인 배치는 아님).'
+                });
+              }
+            }catch{probes.push({path:p,error:'추가 좌석 데이터 확인 불가'});}
+          }
           s.lastSeatDiagnostic={
             checkedAt:new Date(now()).toISOString(),shopName:readable(home.home_shop_name),
-            floorNo,source:null,detectedScripts:[...new Set(attempts.flatMap(a=>a.inspect?.scriptPaths||[]))].slice(0,20),
+            floorNo,source:null,detectedScripts:scripts,detectedReadApis:lookupPaths,
+            inspected,probes,
             attempts:attempts.map(a=>({name:a.name,error:a.error||'',summary:a.summary||null,hints:a.inspect?.hints||null}))
           };
           return response(res,200,{
             ok:false,shopName:readable(home.home_shop_name),floorNo,seats:[],
-            reason:'공식 좌석 화면에는 직접 판독할 수 있는 좌석번호별 상태가 없습니다. JavaScript의 별도 조회 API가 필요한 것으로 보입니다.',
-            inspect:{attempts:s.lastSeatDiagnostic.attempts,detectedScripts:s.lastSeatDiagnostic.detectedScripts}
+            reason:'공식 좌석 화면과 읽기 전용 추가 API에서 좌석별 번호·상태를 확인하지 못했습니다. 좌석총계는 정상이며, 개별 상태는 추정하지 않습니다.',
+            inspect:{attempts:s.lastSeatDiagnostic.attempts,detectedScripts:scripts,
+              detectedReadApis:lookupPaths,inspected,probes}
           });
         }
         if (pathname === '/api/entry-qr' && req.method === 'GET') {
