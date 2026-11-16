@@ -55,10 +55,142 @@ function normalize(input){
     seats,updatedAt:input.updatedAt||null
   };
 }
+
+// Floor-plan positions are transcribed from four user-supplied screenshots of
+// 회원모아독서실 on 2026-11-16. Geometry is illustrative, not official coordinates.
+// Neither the desk color nor the existence of a drawn number establishes live
+// vacancy, ticket eligibility or a successful entry.
+function screenshotSeatPlan(zone){
+  const seats=[];
+  const line=(values,x,y,dx=0,dy=45)=>{
+    values.forEach((id,i)=>seats.push({id:String(id),x:x+dx*i,y:y+dy*i}));
+  };
+  const range=(start,end,step=1)=>Array.from({length:Math.abs(end-start)+1},(_,i)=>start+i*(end>=start?step:-step));
+  if(zone==='1'){
+    line([4,3,2,1],30,335,0,48);
+    line([5,6,7,8,9,10],110,335,0,48);
+    line([16,15,14,13,12,11],179,335,0,48);
+    line([24,23,22,21,20,19,18,17],335,65,0,48);
+    line([25,26,27,28,29,30,31,32,33],437,65,0,48);
+    line([42,41,40,39,38,37,36,35,34],505,65,0,48);
+    line([43,44,45,46,47,48,49],610,160,0,48);
+    line([53,52,51,50],678,335,0,48);
+    line([54,55,56],786,432,0,48);
+    line([88,89,90,91,92,93,94],38,747,65,0);
+    line([95,96,97,98],571,747,65,0);
+    line([87,86,85,84,83,82,81],38,823,65,0);
+    line([80,79,78,77],571,823,65,0);
+    line([66,67,68,69,70,71,72],38,872,65,0);
+    line([73,74,75,76],571,872,65,0);
+    line([65,64,63,62],38,950,65,0);
+    line([61,60,59,58,57],545,950,65,0);
+    return {
+      width:930,height:1020,seats,
+      areas:[
+        {x:22,y:323,w:220,h:315,kind:'desk'},
+        {x:325,y:52,w:236,h:590,kind:'desk'},
+        {x:600,y:152,w:295,h:490,kind:'desk'},
+        {x:30,y:735,w:828,h:187,kind:'walkway'},
+        {x:30,y:936,w:828,h:62,kind:'booth'}
+      ],
+      labels:[
+        {text:'방음부스실',sub:'디지털방음',x:35,y:240},
+        {text:'1인실',x:510,y:798,vertical:true},
+        {text:'방음부스실',sub:'생활방음',x:340,y:952}
+      ],
+      missing:[]
+    };
+  }
+  // Screen-captured right half of the room was horizontally scrollable.
+  // Seat 121–132 positions were not visible and must not be invented.
+  line([133,134,135,136,137,138],460,319,66,0);
+  line([144,143,142,141,140,139],460,380,66,0);
+  line([145,146,147,148,149],596,430,66,0);
+  line([120,119,118,117],50,490,65,0);
+  line([113,114,115,116],50,540,65,0);
+  line([112,111,110,109],50,620,65,0);
+  line([105,106,107,108],50,670,65,0);
+  line([157,156,155,154,153,152,151,150],451,490,66,0);
+  line([158,159,160,161,162,163,164,165],451,540,66,0);
+  line([172,171,170,169,168,167,166],451,620,66,0);
+  line([173,174,175,176,177,178,179],451,670,66,0);
+  line([104,103,102,101,100,99],50,768,65,0);
+  line([186,185,184],725,768,65,0);
+  line([180,181,182,183],969,618,0,50);
+  return {
+    width:1070,height:840,seats,
+    areas:[
+      {x:180,y:40,w:820,h:255,kind:'studio'},
+      {x:36,y:304,w:992,h:438,kind:'group'},
+      {x:441,y:372,w:567,h:360,kind:'desk'},
+      {x:36,y:753,w:992,h:61,kind:'booth'}
+    ],
+    labels:[
+      {text:'스터디룸',x:45,y:55},
+      {text:'다인실',x:55,y:367},
+      {text:'광장형',x:992,y:385,vertical:true},
+      {text:'오픈석',x:990,y:515,vertical:true},
+      {text:'반강함인식',x:565,y:770}
+    ],
+    missing:range(121,132)
+  };
+}
+function renderScreenshotFloorPlan(parent,zone,liveSeats){
+  const plan=screenshotSeatPlan(zone),byId=new Map(liveSeats.map(s=>[String(s.id),s]));
+  parent.classList.add('reference-floor-plan');
+  parent.setAttribute('aria-label',(zone==='1'?'방음부스실·1인실':'다인실·스터디룸')+' · 사용자 제공 사진 기반 좌석도');
+  const viewport=document.createElement('div');
+  viewport.className='reference-floor-viewport';
+  viewport.style.width=plan.width+'px';
+  viewport.style.height=plan.height+'px';
+  for(const area of plan.areas){
+    const region=document.createElement('div');
+    region.className='floor-zone floor-zone-'+area.kind;
+    Object.assign(region.style,{left:area.x+'px',top:area.y+'px',width:area.w+'px',height:area.h+'px'});
+    viewport.appendChild(region);
+  }
+  for(const label of plan.labels){
+    const node=document.createElement('div');
+    node.className='floor-label'+(label.vertical?' floor-label-vertical':'');
+    node.textContent=label.text+(label.sub?' ('+label.sub+')':'');
+    node.style.left=label.x+'px';
+    node.style.top=label.y+'px';
+    viewport.appendChild(node);
+  }
+  for(const point of plan.seats){
+    const matched=byId.get(point.id);
+    const status=['available','occupied','disabled'].includes(matched?.status)?matched.status:'unknown';
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='seat floor-seat '+status+(state.selectedSeat===point.id?' selected':'');
+    b.textContent=point.id;
+    b.title='좌석 '+point.id+' · '+(status==='unknown'?'실시간 상태 미확인':(statusNames[status]||status));
+    b.setAttribute('aria-label',b.title);
+    b.style.left=point.x+'px';b.style.top=point.y+'px';
+    b.addEventListener('click',()=>{
+      state.selectedSeat=point.id;
+      setText('seat-detail',b.title+' · 배치 위치는 제공된 사진을 기준으로 재구성했습니다. 좌석을 누르는 것만으로 입실되지는 않습니다.');
+      buildSeats('seat-map-full');
+    });
+    viewport.appendChild(b);
+  }
+  parent.appendChild(viewport);
+  const foot=document.createElement('p');
+  foot.className='floor-reference-caption';
+  foot.textContent='2026-11-16 원본 앱 사진을 참고한 배치 · '+plan.seats.length+'개 위치 확인 · 실시간 점유 여부는 별도 서버 응답으로만 반영'+
+    (plan.missing.length?' · 위치 미확인: '+plan.missing.join(', ')+'번':'');
+  parent.appendChild(foot);
+}
+
 function buildSeats(containerId){
   const parent=$(containerId);parent.replaceChildren();
-  parent.classList.remove('physical-floor-plan');
+  parent.classList.remove('physical-floor-plan','reference-floor-plan');
   const seats=state.data.seats;
+  const referenceStore=(state.data.store?.name||'').replace(/\s+/g,'')==='회원모아독서실';
+  if(containerId==='seat-map-full'&&liveAuthenticated&&referenceStore){
+    renderScreenshotFloorPlan(parent,selectedSeatZone,seats);
+    return;
+  }
   if(!seats.length){
     const info=document.createElement('p');info.className='empty-seats';
     info.textContent='공식 서버에서 좌석별 번호·상태를 아직 확인하지 못했습니다. 좌석 현황의 개별 좌석 조회 버튼으로 확인해 주세요.';
