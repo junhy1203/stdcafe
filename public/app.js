@@ -669,6 +669,35 @@ async function copySeatDiagnostic(){
 }
 $('seat-diagnostic-copy').addEventListener('click',copySeatDiagnostic);
 
+$('seat-diagnostic-save').addEventListener('click',async()=>{
+  const button=$('seat-diagnostic-save');
+  button.disabled=true;
+  try{
+    const data=await requestJson('/api/diagnostics');
+    if(!data.seatPage){
+      setText('seat-layout-status','저장할 좌석 진단이 없습니다. 먼저 개별 좌석 상태 조회를 실행해 주세요.');
+      return;
+    }
+    const content=JSON.stringify(safeSeatDiagnostic(data),null,2);
+    const file=new Blob([content],{type:'application/json;charset=utf-8'});
+    const objectUrl=URL.createObjectURL(file);
+    try{
+      const link=document.createElement('a');
+      link.href=objectUrl;
+      link.download='stdcafe-seat-diagnostics-v14.json';
+      document.body.append(link);
+      link.click();
+      link.remove();
+    }finally{
+      setTimeout(()=>URL.revokeObjectURL(objectUrl),10000);
+    }
+    setText('seat-layout-status','좌석 진단 JSON 저장 요청을 완료했어. 파일을 이 대화에 첨부하면 분석에 활용할 수 있어. 비밀번호·토큰·쿠키 값·원본 페이지는 제외했어.');
+  }catch(err){
+    setText('seat-layout-status','좌석 진단 JSON 저장 실패: '+err.message);
+  }finally{button.disabled=false;}
+});
+
+
 
 const QR_NS='http://www.w3.org/2000/svg';
 function closeEntry(){
