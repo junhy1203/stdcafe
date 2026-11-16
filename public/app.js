@@ -608,7 +608,7 @@ function safeSeatDiagnostic(data){
     requestMethod:a.requestMethod||null,
     requestFieldNames:a.requestFieldNames||[],
     forensic:a.forensic||null,
-    nativeSeatMarkers:a.forensic?.nativeSeatMarkers||null,
+    nativeSeatMarkers:a.nativeSeatMarkers||null,
     requestHints:Array.isArray(a.requestHints)?a.requestHints.map(h=>({
       path:h.path||'',method:h.method||'UNKNOWN',fields:h.fields||[],source:h.source||''
     })):[]
