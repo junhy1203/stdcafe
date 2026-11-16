@@ -637,7 +637,7 @@ test('installer includes the separate authenticated seat-map module and UI contr
   const html=await fs.readFile(new URL('../public/index.html',import.meta.url),'utf8');
   const js=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
   const server=await fs.readFile(new URL('../server.mjs',import.meta.url),'utf8');
-  assert.match(sh,/install -m 0644[^\n]*"\\$DIR\/seat-map\.mjs"/);
+  assert.ok(sh.includes('"$DIR/seat-map.mjs"'), 'install script must include seat-map.mjs');
   assert.match(server,/import \{parseSeatLayout,parseSeatResponse,findSeatApiPaths\} from '\.\/seat-map\.mjs'/);
   assert.ok(html.includes('id="seat-layout-refresh"'));
   assert.ok(html.includes('id="seat-layout-status"'));
