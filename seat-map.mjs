@@ -160,6 +160,26 @@ function extractHtmlSeatRecords(html){
   }
   return out;
 }
+function pageStructure(html){
+  // Report only counts and broad categories, never page text, input values,
+  // query parameters, or private app tokens.
+  const count=regex=>[...html.matchAll(regex)].length;
+  const loginFields=/<input\b[^>]*(?:type\s*=\s*["']?password|name\s*=\s*["']?(?:password|passwd|pwd))\b/i.test(html);
+  const loginTerms=/(?:로그인|아이디.*비밀번호|login\s*required|session\s*expired|세션.*만료)/i.test(html);
+  const errorTerms=/(?:접근.*불가|권한.*없|알 수 없는 오류|잘못된 요청|not\s*found|unauthorized|forbidden)/i.test(html);
+  return {
+    likelyLoginPage:loginFields||loginTerms,
+    likelyErrorPage:errorTerms,
+    forms:count(/<form\b/gi),
+    scripts:count(/<script\b/gi),
+    externalScripts:count(/<script\b[^>]*\bsrc\s*=/gi),
+    inlineScripts:count(/<script\b(?![^>]*\bsrc\s*=)/gi),
+    iframes:count(/<iframe\b/gi),
+    canvas:count(/<canvas\b/gi),
+    svg:count(/<svg\b/gi),
+    seatIdentifiers:count(/(?:data-seat-no|data-seat-id|SEAT_NO|seatList|seatMap|seatData)/gi)
+  };
+}
 function scriptPaths(html){
   const out=[];
   for(const m of html.matchAll(/<script\b[^>]*src\s*=\s*["']([^"']{1,300})["']/gi)){
@@ -192,6 +212,7 @@ export function parseSeatLayout(html,source='enter'){
       htmlCharacters:html.length,
       scriptPaths:scriptPaths(html),
       candidateApiPaths:findSeatApiPaths(html),
+      structure:pageStructure(html),
       hints:{
         hasSeatKeyword:/seat|좌석|자리/i.test(html),
         hasWebviewData:/chart|canvas|floor/i.test(html),
