@@ -6,10 +6,10 @@
  */
 const MAX_HTML = 1_000_000;
 const MAX_SEATS = 500;
-const SEAT_KEYS = ['SEAT_NO','seat_no','seatNo','seat_num','seatNum','SEAT_NUM','seat_id','seatId','SEAT_ID','no','seat_number','seatNumber'];
+const SEAT_KEYS = ['SEAT_NO','seat_no','seatNo','seat_num','seatNum','SEAT_NUM','seat_id','seatId','SEAT_ID','no','seat_number','seatNumber','seat','seat_label','seatLabel','SEAT_NAME'];
 const STATUS_KEYS = ['SEAT_STATUS','seat_status','seatStatus','status','STATUS','USE_YN','use_yn','usedYn','USED_YN','USE_STATE','useState','state','STATE','isUsed','occupied','isOccupied'];
-const X_KEYS = ['SEAT_X','seat_x','seatX','pos_x','posX','x','X','LEFT','left'];
-const Y_KEYS = ['SEAT_Y','seat_y','seatY','pos_y','posY','y','Y','TOP','top'];
+const X_KEYS = ['SEAT_X','seat_x','seatX','SEAT_POSITION_X','POS_X','pos_x','posX','x','X','LEFT','left','leftPos'];
+const Y_KEYS = ['SEAT_Y','seat_y','seatY','SEAT_POSITION_Y','POS_Y','pos_y','posY','y','Y','TOP','top','topPos'];
 const ATTR_SEAT_KEYS=['data-seat-no','data-seat-id','data-seatnum','data-seat-num','data-seat-number','data-no'];
 const ATTR_STATUS_KEYS=['data-seat-status','data-status','data-state','data-use-yn','data-occupied','data-used','aria-label','title'];
 const get = (o,keys) => { for(const k of keys) if(Object.hasOwn(o,k) && o[k]!==null && o[k]!==undefined) return [o[k],k]; return [null,null]; };
@@ -33,9 +33,14 @@ function occupancy(v,key,context=''){
   if(free.includes(code))return 'available';
   if(taken.includes(code))return 'occupied';
   if(mine.includes(code))return 'mine';
-  if(/^(isUsed|isOccupied|usedYn|USE_YN|use_yn|USED_YN)$/i.test(key||'')){
+  if(/^(isUsed|isOccupied|usedYn|USE_YN|use_yn|USED_YN|data-use-yn|data-used|data-occupied)$/i.test(key||'')){
     if(['y','yes','true','1'].includes(code))return 'occupied';
     if(['n','no','false','0'].includes(code))return 'available';
+  }
+  if(key==='class'){
+    if(/(?:^|[-_])(?:available|free|vacant|empty)(?:$|[-_])/.test(code))return 'available';
+    if(/(?:^|[-_])(?:occupied|busy|inuse|used)(?:$|[-_])/.test(code))return 'occupied';
+    if(/(?:^|[-_])(?:disabled|blocked)(?:$|[-_])/.test(code))return 'disabled';
   }
   if(key==='aria-label'||key==='title'||key==='class'){
     if(/(?:사용\s*중|이용\s*중|예약\s*중)/.test(context||code))return 'occupied';
@@ -44,17 +49,17 @@ function occupancy(v,key,context=''){
   // App-specific one-letter SEAT_STATE/SEAT_STATUS codes (C etc.) are not verified.
   return null;
 }
-function seatFromObject(o){
+function seatFromObject(o,seatContext=false){
   if(!o||typeof o!=='object'||Array.isArray(o))return null;
   const [rawId,key]=get(o,SEAT_KEYS);
   let id=safeString(rawId,40);
-  if(key==='no' && !Object.keys(o).some(k=>/seat|좌석/i.test(k)))return null;
+  if(key==='no' && !seatContext && !Object.keys(o).some(k=>/seat|좌석/i.test(k)))return null;
   if(!/^[\p{L}\p{N}_\- ]{1,30}$/u.test(id))return null;
   const [rawStatus,stateKey]=get(o,STATUS_KEYS);
   const status=occupancy(rawStatus,stateKey);
   // A legitimate, identified seat may have an undocumented app-specific
   // status code. Show it as unknown, never fabricate an available seat.
-  if(!status && !stateKey && !/^SEAT_|^seat/i.test(key))return null;
+  if(!status && !stateKey && !seatContext && !/^SEAT_|^seat/i.test(key))return null;
   return {id,status:status||'unknown',x:coordinates(o,X_KEYS),y:coordinates(o,Y_KEYS)};
 }
 function decodeHtml(v){return String(v).replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'").replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&amp;/gi,'&');}
@@ -87,8 +92,10 @@ function seatFromElement(a){
   const style=a.style||'';
   const left=/\bleft\s*:\s*(-?\d+(?:\.\d+)?)\s*(?:px|%)/i.exec(style);
   const top=/\btop\s*:\s*(-?\d+(?:\.\d+)?)\s*(?:px|%)/i.exec(style);
+  const translate=/translate(?:3d)?\s*\(\s*(-?\d+(?:\.\d+)?)px\s*,\s*(-?\d+(?:\.\d+)?)px/i.exec(style);
   if(left)obj.x=left[1];
   if(top)obj.y=top[1];
+  if(translate){obj.x=translate[1];obj.y=translate[2];}
   if(a['data-x'])obj.x=a['data-x'];
   if(a['data-y'])obj.y=a['data-y'];
   return seatFromObject(obj);
@@ -119,17 +126,18 @@ function arrayCandidates(html){
   for(const m of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]{0,200000}?)<\/script>/gi))inputs.push(m[1]);
   return inputs.slice(0,16);
 }
-function collectObjects(input,out,depth=0){
+function collectObjects(input,out,depth=0,seatContext=false){
   if(depth>7 || out.length>=MAX_SEATS*3)return;
-  if(Array.isArray(input)){for(const item of input.slice(0,MAX_SEATS*3))collectObjects(item,out,depth+1);return;}
+  if(Array.isArray(input)){for(const item of input.slice(0,MAX_SEATS*3))collectObjects(item,out,depth+1,seatContext);return;}
   if(!input||typeof input!=='object')return;
-  const seat=seatFromObject(input);
+  const seat=seatFromObject(input,seatContext);
   if(seat)out.push(seat);
   for(const [key,value] of Object.entries(input)){
     if(/password|token|secret|private|user|account|name/i.test(key)&&!/seat|room|chart/i.test(key))continue;
-    if(value&&typeof value==='object')collectObjects(value,out,depth+1);
+    const isSeatCollection=seatContext||/seat|chart|자리|좌석/i.test(key);
+    if(value&&typeof value==='object')collectObjects(value,out,depth+1,isSeatCollection);
     else if(typeof value==='string'&&value.length<200000&&/^[\s]*[\[{]/.test(value)){
-      try{collectObjects(JSON.parse(value),out,depth+1)}catch{}
+      try{collectObjects(JSON.parse(value),out,depth+1,isSeatCollection)}catch{}
     }
   }
 }
@@ -141,8 +149,8 @@ function extractHtmlSeatRecords(html){
     if(out.length>=MAX_SEATS*2)break;
   }
   for(const candidate of arrayCandidates(html)){
-    try{collectObjects(JSON.parse(candidate),out);}
-    catch{const parsed=normalizeLooseJson(candidate);if(parsed)collectObjects(parsed,out);}
+    try{collectObjects(JSON.parse(candidate),out,0,true);}
+    catch{const parsed=normalizeLooseJson(candidate);if(parsed)collectObjects(parsed,out,0,true);}
   }
   return out;
 }
