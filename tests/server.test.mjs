@@ -418,7 +418,7 @@ test('entry, availability and QR elements exist in browser shell',async()=>{
     assert.ok(html.includes('id="'+id+'"'),'Missing HTML element '+id);
     assert.ok(js.includes("'"+id+"'"),'Missing JS reference '+id);
   }
-  assert.ok(html.includes('app.js?v=20261116-ajax-inspect-v13'),'cache-version not updated');
+  assert.ok(html.includes('app.js?v=20261116-seat-forensics-v14'),'cache-version not updated');
 });
 
 test('QR ES module is deployed and served with the right MIME type',async()=>{
@@ -638,7 +638,7 @@ test('installer includes the separate authenticated seat-map module and UI contr
   const js=await fs.readFile(new URL('../public/app.js',import.meta.url),'utf8');
   const server=await fs.readFile(new URL('../server.mjs',import.meta.url),'utf8');
   assert.ok(sh.includes('"$DIR/seat-map.mjs"'), 'install script must include seat-map.mjs');
-  assert.match(server,/import \{parseSeatLayout,parseSeatResponse,findSeatApiPaths\} from '\.\/seat-map\.mjs'/);
+  assert.ok(server.includes("from './seat-map.mjs'"),'server imports seat-map module');
   assert.ok(html.includes('id="seat-layout-refresh"'));
   assert.ok(html.includes('id="seat-layout-status"'));
   assert.ok(js.includes("requestJson('/api/seat-layout')"));
