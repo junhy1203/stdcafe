@@ -13,7 +13,7 @@ import {parseSeatLayout,parseSeatResponse,findSeatApiPaths} from './seat-map.mjs
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
-const APP_VERSION = '2026-11-16-seat-layout-v10';
+const APP_VERSION = '2026-11-16-personal-seat-v11';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -394,18 +394,26 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             return response(res,200,{ok:false,source:'app-home',seats:[],reason:'앱 홈에서 현재 매장 정보를 조회할 수 없습니다.'});
           const shopNo=readable(home.home_shop_no,40);
           const floorNo=readable(home.home_floor_no,40);
-          if(!/^[0-9A-Za-z_-]{1,40}$/.test(shopNo)||!/^[0-9A-Za-z_-]{1,40}$/.test(floorNo))
-            return response(res,200,{ok:false,source:'app-home',seats:[],reason:'현재 매장번호 또는 층번호가 누락되어 실제 좌석 화면을 특정할 수 없습니다.'});
+          if(!/^[0-9A-Za-z_-]{1,40}$/.test(shopNo))
+            return response(res,200,{ok:false,source:'app-home',seats:[],reason:'현재 매장번호가 없어 좌석 조회 화면을 특정할 수 없습니다.'});
+          const validFloor=/^[0-9A-Za-z_-]{1,40}$/.test(floorNo);
           const attempts=[];
-          for(const [name,pathnameUp] of [
-            ['enter','/mobile/enterSeatView.do'],
-            ['change','/mobile/seatChangeView.do']
+          // APK Lg5/c.onSingleClick uses getPersonal() for the normal
+          // personal-seat screen (token, device, shop); the earlier code
+          // incorrectly probed only enter/change screens.
+          for(const [name,pathnameUp,needsFloor] of [
+            ['personal','/mobile/purchase/personal.do',false],
+            ['enter','/mobile/enterSeatView.do',true],
+            ['change','/mobile/seatChangeView.do',true]
           ]){
+            if(needsFloor&&!validFloor){
+              attempts.push({name,error:'층 번호 없음 · 해당 화면의 조회 생략'});continue;
+            }
             const url=new URL(pathnameUp,UPSTREAM);
             url.searchParams.set('tk',s.token);
             url.searchParams.set('m_value',s.device);
             url.searchParams.set('SHOP_NO',shopNo);
-            url.searchParams.set('FLOOR_NO',floorNo);
+            if(needsFloor)url.searchParams.set('FLOOR_NO',floorNo);
             try{
               const remote=await upstream(url,{method:'GET',headers:{Accept:'text/html,application/xhtml+xml'}},s.jar);
               const mime=remote.resp.headers.get('content-type')||'';
