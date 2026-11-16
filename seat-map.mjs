@@ -52,8 +52,10 @@ function seatFromObject(o){
   if(!/^[\p{L}\p{N}_\- ]{1,30}$/u.test(id))return null;
   const [rawStatus,stateKey]=get(o,STATUS_KEYS);
   const status=occupancy(rawStatus,stateKey);
-  if(!status)return null;
-  return {id,status,x:coordinates(o,X_KEYS),y:coordinates(o,Y_KEYS)};
+  // A legitimate, identified seat may have an undocumented app-specific
+  // status code. Show it as unknown, never fabricate an available seat.
+  if(!status && !stateKey && !/^SEAT_|^seat/i.test(key))return null;
+  return {id,status:status||'unknown',x:coordinates(o,X_KEYS),y:coordinates(o,Y_KEYS)};
 }
 function decodeHtml(v){return String(v).replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'").replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&amp;/gi,'&');}
 function htmlAttrs(tag){
@@ -145,10 +147,10 @@ export function parseSeatLayout(html,source='enter'){
   const seats=[...byId.values()].slice(0,MAX_SEATS);
   const placed=seats.filter(s=>s.x!==null&&s.y!==null).length;
   const actualPositions=seats.length>2&&placed===seats.length;
-  const [available,occupied]=['available','occupied'].map(status=>seats.filter(s=>s.status===status).length);
+  const [available,occupied,unknown]=['available','occupied','unknown'].map(status=>seats.filter(s=>s.status===status).length);
   return {
     source,seats,actualPositions,
-    summary:{count:seats.length,available,occupied,coordinates:placed,conflicts:conflict},
+    summary:{count:seats.length,available,occupied,unknown,coordinates:placed,conflicts:conflict},
     inspect:{
       htmlCharacters:html.length,
       scriptPaths:scriptPaths(html),
