@@ -535,3 +535,78 @@ test('native WebView seat layout falls back without inventing seats when HTML on
     assert.ok(result.reason.includes('별도 조회 API'));
   }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+
+test('seat WebView Javascript discovers a read-only seat-status GET endpoint', async()=>{
+  const {findSeatApiPaths,parseSeatResponse}=await import('../seat-map.mjs');
+  const found=findSeatApiPaths("const url='/mobile/seatStatusList.do';const dangerous='/mobile/seatChangeView.do';");
+  assert.deepEqual(found,['/mobile/seatStatusList.do']);
+  const rows=parseSeatResponse(JSON.stringify({rspcode:'0000',result:JSON.stringify({seatList:[
+    {SEAT_NO:'11',USE_YN:'N',SEAT_X:10,SEAT_Y:20},
+    {SEAT_NO:'12',USE_YN:'Y',SEAT_X:20,SEAT_Y:20}
+  ]})}));
+  assert.equal(rows.summary.available,1);
+  assert.equal(rows.summary.occupied,1);
+  const urls=[];
+  const mock=async(url,opts)=>{
+    const u=new URL(url);urls.push(u.pathname);
+    if(u.pathname==='/api/app.do'){
+      const req=JSON.parse(opts.body);
+      if(req.cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'PRIVATE_TOKEN'}}),'application/json');
+      return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'7',home_floor_no:'1',home_shop_name:'테스트 독서실'}}),'application/json');
+    }
+    if(/View\.do$/.test(u.pathname))return mkResponse('<html><script src="/js/seat.js"></script>자리 조회 안내</html>','text/html');
+    if(u.pathname==='/js/seat.js')return mkResponse("const url='/mobile/seatStatusList.do';const bad='/mobile/seatChangeView.do';",'text/javascript');
+    if(u.pathname==='/mobile/seatStatusList.do'){
+      assert.equal(u.searchParams.get('SHOP_NO'),'7');
+      assert.equal(u.searchParams.get('FLOOR_NO'),'1');
+      return mkResponse(JSON.stringify({result:[{SEAT_NO:'A1',USE_YN:'N',SEAT_X:10,SEAT_Y:20},{SEAT_NO:'A2',USE_YN:'Y',SEAT_X:25,SEAT_Y:20}]}),'application/json');
+    }
+    throw Error('unexpected '+u.pathname);
+  };
+  const server=createApp({fetchImpl:mock});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const init=await fetch(base+'/api/session'),csrf=(await init.json()).csrf,cookie=init.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'demo',password:'pw'})});
+    assert.equal(login.status,200);
+    const map=await fetch(base+'/api/seat-layout',{headers:{Cookie:cookie}});
+    assert.equal(map.status,200);
+    const raw=await map.text(),data=JSON.parse(raw);
+    assert.equal(data.ok,true);
+    assert.equal(data.summary.available,1);
+    assert.equal(data.summary.occupied,1);
+    assert.ok(urls.includes('/js/seat.js'));
+    assert.ok(urls.includes('/mobile/seatStatusList.do'));
+    assert.ok(!urls.includes('/mobile/seatChange.do'));
+    assert.ok(!raw.includes('PRIVATE_TOKEN'));
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
+
+test('time-based pass converts remaining period 866 minutes to 14 hours 26 minutes',async()=>{
+  const remote=async(url,opts)=>{
+    const u=new URL(url);
+    if(u.pathname==='/api/app.do'){
+      const data=JSON.parse(opts.body);
+      if(data.cmd==='1201')return mkResponse(JSON.stringify({rspcode:'0000',result:{s_value:'Y',a_value:'TEST_TOKEN'}}),'application/json');
+      if(data.cmd==='1100')return mkResponse(JSON.stringify({rspcode:'0000',result:{home_shop_no:'15',home_shop_name:'카페',recent_shop_use_list:[]}}),'application/json');
+      if(data.cmd==='1101')return mkResponse(JSON.stringify({rspcode:'0000',result:{lsat_goods_use_info:[{SHOP_NO:'15',SHOP_NAME:'카페',GOODS_NAME:'다인실 등 30시간',REMAIN_PERIOD:'866',SEAT_STATE:'C'}]}}),'application/json');
+    }
+    return mkResponse('<html><body>안내</body></html>','text/html');
+  };
+  const server=createApp({fetchImpl:remote});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base='http://127.0.0.1:'+server.address().port;
+  try{
+    const a=await fetch(base+'/api/session'),csrf=(await a.json()).csrf,Cookie=a.headers.get('set-cookie').split(';')[0];
+    const login=await fetch(base+'/api/login',{method:'POST',headers:{Cookie,'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({username:'test',password:'test'})});
+    assert.equal(login.status,200);
+    const r=await fetch(base+'/api/status',{headers:{Cookie}});
+    const data=await r.json();
+    assert.equal(data.member.ticket.remainingMinutes,866);
+    assert.equal(Math.floor(866/60),14);
+    assert.equal(866%60,26);
+    assert.match(data.live.remainingTimeInterpretation,/잠정/);
+  }finally{await new Promise(resolve=>server.close(resolve))}
+});
