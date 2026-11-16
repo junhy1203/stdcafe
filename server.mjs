@@ -493,7 +493,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               if(parsed.seats.length){
                 // An inline seatNo_ marker is an ID, not reliable occupancy
                 // evidence. Keep scanning read-only APIs before presenting it.
-                if(parsed.partialSeatList){
+                if(parsed.partialSeatList || (parsed.inspect?.nativeMarkers?.count||0)>0){
                   if(!provisionalSeats||parsed.seats.length>provisionalSeats.seats.length)
                     provisionalSeats=parsed;
                 }else{
