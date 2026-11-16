@@ -519,9 +519,13 @@ async function fetchLive(){
       return false;
     }
     state.origin='live';render();
+    if((received.live?.remainingTimeInterpretation||'').includes('잠정')){
+      setText('pass-source','쌤카페 이용권 API · REMAIN_PERIOD를 분으로 잠정 해석');
+    }
     if(state.currentView==='seats')await loadSeatLayout();
     bridgeStatus('로그인됨 · 앱 API '+apiCount+'/2개 · 웹페이지 '+count+'/4개 · 확인된 값 반영');
-    lookupSummary('현재 매장: '+(received.store?.name&&received.store.name!=='매장 정보 미확인'?'확인':'미확인')+' · 이용권: '+(received.live?.ticketItems?.length?'확인':'미확인')+' · 좌석: '+(received.member?.seat?'확인':'미확인')+' · 잔여시간: '+(Number.isFinite(received.member?.ticket?.remainingMinutes)?'확인':'미확인'));
+    const timeNote=received.live?.remainingTimeInterpretation||'';
+    lookupSummary('현재 매장: '+(received.store?.name&&received.store.name!=='매장 정보 미확인'?'확인':'미확인')+' · 이용권: '+(received.live?.ticketItems?.length?'확인':'미확인')+' · 좌석: '+(received.member?.seat?'확인':'미확인')+' · 잔여시간: '+(Number.isFinite(received.member?.ticket?.remainingMinutes)?'확인 ('+timeNote+')':'미확인'));
     toast('실제 앱 데이터 '+apiCount+'/2개 API 조회 · 확인된 항목만 반영');
     return true;
   }catch(err){
