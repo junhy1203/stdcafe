@@ -579,7 +579,7 @@ async function loadSeatLayout(force=false){
     const report=payload.summary||{};
     const partial=!!payload.partialSeatList;
     setText('seat-layout-status',partial
-      ?'공식 화면에서 좌석번호 '+payload.seats.length+'개 발견(일부일 수 있음) · 빈자리/이용 중 상태와 실제 위치는 미확인. 총계와 별개입니다.'
+      ?'공식 화면에서 좌석번호 '+payload.seats.length+'개 발견(일부일 수 있음) · 확인된 빈 좌석 '+(report.available||0)+'개 · 사용 중 '+(report.occupied||0)+'개 · 상태 미확인 '+(report.unknown||0)+'개 · 실제 위치 미확인 · 매장 전체 집계와 별개입니다.'
       :'좌석번호 '+payload.seats.length+'개 조회 · 빈 좌석 '+(report.available||0)+'개 · 사용 중 '+(report.occupied||0)+'개'+
         (report.unknown?' · 상태 미확인 '+report.unknown+'개':'')+
         (payload.actualPositions?' · 서버 제공 좌표로 실제 배치':' · 위치 정보가 없어 목록형 그림으로 표시'));
