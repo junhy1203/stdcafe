@@ -14,7 +14,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
 const NATIVE_WEBVIEW_UA='Mozilla/5.0 (Linux; Android 13; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/118.0.0.0 Mobile Safari/537.36';
-const APP_VERSION = '2026-11-16-seat-forensics-v14';
+const APP_VERSION = '2026-11-16-native-seat-markers-v15';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
 const COOKIE = 'ssam_bridge_sid';
@@ -463,6 +463,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             }
           };
           const attempts=[];
+          let provisionalSeats=null;
           // APK Lg5/c.onSingleClick uses getPersonal() for the normal
           // personal-seat screen (token, device, shop); the earlier code
           // incorrectly probed only enter/change screens.
@@ -490,16 +491,24 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                 http:seatHttpMetadata(remote.resp,remote.text),
                 redirects:remote.redirects,finalPath:remote.finalPath});
               if(parsed.seats.length){
-                s.lastSeatDiagnostic={
-                  checkedAt:new Date(now()).toISOString(),...diagnosticContext,shopIdentified:Boolean(readable(home.home_shop_name)),
-                  floorNo,source:name,summary:parsed.summary,
-                  detectedScripts:parsed.inspect.scriptPaths
-                };
-                return response(res,200,{
-                  ok:true,shopName:readable(home.home_shop_name),floorNo,
-                  ...parsed,
-                  note:parsed.actualPositions?'실제 페이지에 포함된 좌표로 표시':'좌석번호·상태 목록을 시각화한 것으로 실제 공간 배치는 아닙니다.'
-                });
+                // An inline seatNo_ marker is an ID, not reliable occupancy
+                // evidence. Keep scanning read-only APIs before presenting it.
+                if(parsed.partialSeatList){
+                  if(!provisionalSeats||parsed.seats.length>provisionalSeats.seats.length)
+                    provisionalSeats=parsed;
+                }else{
+                  s.lastSeatDiagnostic={
+                    checkedAt:new Date(now()).toISOString(),...diagnosticContext,shopIdentified:Boolean(readable(home.home_shop_name)),
+                    floorNo,source:name,summary:parsed.summary,
+                    detectedScripts:parsed.inspect.scriptPaths,
+                    attempts:attempts.map(a=>({name:a.name,summary:a.summary||null,source:a.inspect?.nativeMarkers||null}))
+                  };
+                  return response(res,200,{
+                    ok:true,shopName:readable(home.home_shop_name),floorNo,
+                    ...parsed,
+                    note:parsed.actualPositions?'실제 페이지에 포함된 좌표로 표시':'확인된 좌석번호와 상태를 목록형으로 표시합니다. 전체 배치도와 다를 수 있습니다.'
+                  });
+                }
               }
             }catch(e){
               attempts.push({name,error:e.status?readable(e.message,120):'HTML 구조 또는 응답을 분석할 수 없음',durationMs:now()-started});
@@ -615,7 +624,8 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
           }
           s.lastSeatDiagnostic={
             checkedAt:new Date(now()).toISOString(),...diagnosticContext,shopIdentified:Boolean(readable(home.home_shop_name)),
-            floorNo,source:null,detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,
+            floorNo,source:provisionalSeats?.source||null,summary:provisionalSeats?.summary||null,
+            detectedScripts:scripts,discoveredScripts:allScripts,detectedReadApis:lookupPaths,requestHints,
             inspected,probes,
             attempts:attempts.map(a=>({
               name:a.name,error:a.error||'',summary:a.summary||null,
@@ -627,6 +637,16 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
               htmlCharacters:a.inspect?.htmlCharacters??null
             }))
           };
+          if(provisionalSeats){
+            return response(res,200,{
+              ok:true,shopName:readable(home.home_shop_name),floorNo,
+              ...provisionalSeats,
+              partialSeatList:true,
+              note:'앱의 인라인 스크립트에서 실제 좌석번호 일부만 확인했습니다. 빈자리·이용 중 상태와 위치는 미확인입니다.',
+              inspect:{attempts:s.lastSeatDiagnostic.attempts,detectedScripts:scripts,
+                detectedReadApis:lookupPaths,discoveredScripts:allScripts,requestHints,inspected,probes}
+            });
+          }
           return response(res,200,{
             ok:false,shopName:readable(home.home_shop_name),floorNo,seats:[],
             reason:'공식 좌석 화면과 읽기 전용 추가 API에서 좌석별 번호·상태를 확인하지 못했습니다. 좌석총계는 정상이며, 개별 상태는 추정하지 않습니다.',
