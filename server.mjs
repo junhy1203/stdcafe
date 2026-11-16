@@ -13,6 +13,7 @@ import {parseSeatLayout,parseSeatResponse,findSeatApiPaths,analyzeSeatDocument,a
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const UPSTREAM = 'https://m.ssamcafe.com';
+const NATIVE_WEBVIEW_UA='Mozilla/5.0 (Linux; Android 13; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/118.0.0.0 Mobile Safari/537.36';
 const APP_VERSION = '2026-11-16-seat-forensics-v14';
 const PASSWORD_SUFFIX = '2V35NWWYUOQAUVONRI85298Q2YG5OY0F'; // public APK constant, NOT a secret
 const LIMIT = 1_000_000;
@@ -334,7 +335,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
       const headers={
         Accept:'text/html,application/xhtml+xml',
         'Accept-Language':'ko-KR,ko;q=0.9',
-        'User-Agent':'Mozilla/5.0 (Linux; Android 13; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/118.0.0.0 Mobile Safari/537.36'
+        'User-Agent':NATIVE_WEBVIEW_UA
       };
       const cookies=cookieHeader(jar);
       if(cookies)headers.Cookie=cookies;
@@ -504,7 +505,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
             try{
               const url=new URL(p,UPSTREAM);
               if(url.origin!==UPSTREAM)return;
-              const remote=await upstream(url,{method:'GET',headers:{Accept:'text/javascript,application/javascript'}},s.jar);
+              const remote=await upstream(url,{method:'GET',headers:{Accept:'text/javascript,application/javascript','User-Agent':NATIVE_WEBVIEW_UA,Referer:UPSTREAM+'/mobile/purchase/personal.do'}},s.jar);
               const analysis=analyzeSeatScript(remote.text);
               const candidates=findSeatApiPaths(remote.text);
               inspected.push({path:p,candidates,
@@ -560,6 +561,7 @@ export function createApp({ fetchImpl = fetch, now = () => Date.now() } = {}) {
                 headers:{
                   Accept:'application/json,text/html',
                   Referer:UPSTREAM+'/mobile/purchase/personal.do',
+                  'User-Agent':NATIVE_WEBVIEW_UA,
                   ...(confirmedAjax.length?{'X-Requested-With':'XMLHttpRequest'}:{}),
                   ...(method==='POST'?{'Content-Type':'application/x-www-form-urlencoded',Origin:UPSTREAM}:{})
                 },
