@@ -366,6 +366,7 @@ function showDiagnosticResult(data, sessionResponse){
       '좌석 관련 읽기 전용 API 후보 '+apiPaths.length+'개'
     ];
     if(apiPaths.length)parts.push('후보 경로: '+apiPaths.join(', '));
+    if(seatDiag.requestHints?.length)parts.push('페이지에서 확인된 실제 요청 방법: '+seatDiag.requestHints.map(h=>h.path+' '+h.method).join(', '));
     const tries=seatDiag.attempts||[];
     for(const t of tries){
       const detail=[
@@ -599,7 +600,10 @@ function safeSeatDiagnostic(data){
     htmlCharacters:a.htmlCharacters??null,
     structure:a.structure||null,
     hints:a.hints||null,
-    seatsFound:a.summary?.count??0
+    seatsFound:a.summary?.count??0,
+    requestHints:Array.isArray(a.requestHints)?a.requestHints.map(h=>({
+      path:h.path||'',method:h.method||'UNKNOWN',fields:h.fields||[],source:h.source||''
+    })):[]
   });
   return {
     version:data?.version||'',
@@ -612,6 +616,7 @@ function safeSeatDiagnostic(data){
       attemptedPages:Array.isArray(page?.attempts)?page.attempts.map(attempt):[],
       loadedJsPaths:Array.isArray(page?.detectedScripts)?page.detectedScripts.slice(0,16):[],
       seatReadApiCandidates:Array.isArray(page?.detectedReadApis)?page.detectedReadApis.slice(0,16):[],
+      requestHints:Array.isArray(page?.requestHints)?page.requestHints.slice(0,24):[],
       jsAnalysis:Array.isArray(page?.inspected)?page.inspected.map(x=>({
         path:x.path||'',candidatePaths:x.candidates||[],error:x.error||''
       })):[],
